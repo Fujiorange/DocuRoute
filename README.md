@@ -4,7 +4,7 @@ A document management platform for Singapore construction and engineering compan
 
 ## Tech Stack
 
-- **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, shadcn/ui
+- **Frontend**: Next.js 16 (App Router), TypeScript, Tailwind CSS, shadcn/ui
 - **Backend**: Next.js API Routes
 - **Database**: PostgreSQL (Neon), Prisma ORM
 - **Auth**: JWT (httpOnly cookies), bcrypt
