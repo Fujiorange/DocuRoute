@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  subdomain String?  @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  projects    Project[]
+  documents   Document[]
+  invitations Invitation[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String
+  passwordHash String
+  name         String
+  role         String   @default("engineer")
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects    Project[]
+  documents   Document[]
+  invitations Invitation[]
+
+  @@unique([companyId, email])
+}
+
+model Project {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents Document[]
+
+  @@unique([companyId, name])
+}
+
+model Document {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+
+  filePath String
+  fileName String
+  fileSize Int
+  mimeType String
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model Invitation {
+  id    String @id @default(cuid())
+  email String
+  role  String
+  token String @unique
+
+  expiresAt DateTime
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  invitedById String
+  invitedBy   User   @relation(fields: [invitedById], references: [id])
+
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([companyId, email])
+}
