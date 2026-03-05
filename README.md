@@ -1,282 +1,507 @@
-# DocuRoute
+# DocuRoute - Production-Grade Document Management SaaS
 
-Document management platform for Singapore construction and engineering companies.
+**Enterprise document management platform for Singapore construction and engineering companies**
 
-## Tech Stack
-
-- **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS v4, shadcn/ui, Zustand
-- **Backend**: Next.js API Routes, Prisma v7 ORM, PostgreSQL
-- **Auth**: JWT in httpOnly cookies, bcryptjs
-- **Storage**: Local disk (`/public/uploads/`) — ephemeral on Render (Phase 1)
-- **Deploy**: Render (Web Service) + Neon / Render PostgreSQL
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-7-teal)](https://www.prisma.io/)
 
 ---
 
-## Complete Setup Guide (for New Programmers)
+## 🚀 Features
 
-Follow every step in order. Do not skip any step.
+### Core Features
+- ✅ **Multi-Tenant SaaS Architecture** - Complete company isolation with JWT authentication
+- ✅ **Secure Cloud Storage** - AWS S3 with AES-256 encryption at rest
+- ✅ **Document Management** - Upload, organize, version, and manage documents up to 200 MB
+- ✅ **Folder Organization** - Hierarchical folder structure with project-based organization
+- ✅ **Full-Text Search** - Search documents by title, description, filename, tags, and project phase
+- ✅ **Approval Workflows** - Draft → Pending → Approved status with email notifications
+- ✅ **Commenting System** - Threaded comments on documents for collaboration
+- ✅ **Version Control** - Track document versions with change notes
 
----
+### Security & Compliance
+- ✅ **Role-Based Access Control (RBAC)** - IT Admin, Project Admin, Engineer, Client roles
+- ✅ **Two-Factor Authentication (2FA)** - TOTP with QR code setup
+- ✅ **Password Reset** - Secure email-based password recovery
+- ✅ **Audit Logging** - Complete audit trail of all actions
+- ✅ **Rate Limiting** - Protection against abuse (100 req/15min default)
+- ✅ **PDPA/GDPR Compliance** - Data export and account deletion tools
+- ✅ **Encryption** - End-to-end encryption for documents
 
-### Step 1 — Install Prerequisites
+### Email & Notifications
+- ✅ **Real Email System** - Resend integration for all notifications
+- ✅ **User Invitations** - Email invites with secure tokens
+- ✅ **Password Reset** - One-time reset links
+- ✅ **Upload Notifications** - Notify team members of new documents
+- ✅ **Approval Requests** - Alert approvers when action is needed
 
-Before you can run this project you need two tools installed on your computer.
-
-#### 1a. Install Node.js (includes npm)
-
-Node.js is the runtime that executes the project code. npm is the package manager that comes bundled with it.
-
-1. Go to [https://nodejs.org](https://nodejs.org)
-2. Download the **LTS** (Long Term Support) version — it is the most stable
-3. Run the installer and follow the on-screen steps (keep all defaults)
-4. Open a terminal / command prompt and verify the installation:
-
-```bash
-node --version
-npm --version
-```
-
-You should see version numbers printed for both commands (e.g. `v20.x.x` and `10.x.x`).
-
-> **Windows tip**: Search for "Command Prompt" or "PowerShell" in the Start menu to open a terminal.  
-> **macOS tip**: Open the "Terminal" app from Applications → Utilities.
-
-#### 1b. Install Git
-
-Git lets you download (clone) this repository to your computer.
-
-1. Go to [https://git-scm.com/downloads](https://git-scm.com/downloads)
-2. Download and install the version for your operating system (keep all defaults)
-3. Verify in a terminal:
-
-```bash
-git --version
-```
-
-You should see something like `git version 2.x.x`.
+### Analytics & Reporting
+- ✅ **Storage Analytics** - Per-company storage usage tracking
+- ✅ **Activity Dashboard** - Recent activity and document statistics
+- ✅ **Top Contributors** - Track most active users
+- ✅ **Document Status Reports** - Breakdown by draft/pending/approved
 
 ---
 
-### Step 2 — Get a PostgreSQL Database
+## 🏗️ Tech Stack
 
-This project requires a PostgreSQL database to store its data. You have two options:
-
-#### Option A — Free cloud database with Neon (Recommended for beginners — no local install needed)
-
-1. Go to [https://neon.tech](https://neon.tech) and create a free account
-2. Click **"Create Project"**, give it any name (e.g. `docuroute`), and select the region closest to you
-3. After the project is created, find the **Connection Details** panel
-4. Select **"Connection string"** from the dropdown and copy the full string — it looks like:
-   ```
-   postgresql://alex:AbC123dEf@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
-   ```
-5. Save this connection string — you will need it in Step 5
-
-#### Option B — Local PostgreSQL installation
-
-1. Go to [https://www.postgresql.org/download/](https://www.postgresql.org/download/) and install PostgreSQL for your OS
-2. During installation, set a password for the `postgres` user (remember it!)
-3. After installation, open **pgAdmin** (installed with PostgreSQL) or a terminal and create a new database called `docuroute`:
-   ```bash
-   psql -U postgres -c "CREATE DATABASE docuroute;"
-   ```
-4. Your connection string will be:
-   ```
-   postgresql://postgres:YOUR_PASSWORD@localhost:5432/docuroute
-   ```
-   Replace `YOUR_PASSWORD` with the password you set during installation.
+| Category | Technology |
+|----------|-----------|
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS v4 |
+| **Backend** | Next.js API Routes, Node.js |
+| **Database** | PostgreSQL (Neon / Render) |
+| **ORM** | Prisma v7 with PostgreSQL adapter |
+| **Storage** | AWS S3 (or Backblaze B2) with encryption |
+| **Email** | Resend (or SendGrid) |
+| **Authentication** | JWT in httpOnly cookies, bcryptjs |
+| **2FA** | Speakeasy (TOTP) |
+| **Monitoring** | Sentry (error tracking) |
+| **UI Components** | shadcn/ui, Radix UI |
+| **State Management** | Zustand |
 
 ---
 
-### Step 3 — Clone the Repository
+## 📋 Prerequisites
 
-A "clone" downloads a copy of the project code to your computer.
+Before you begin, ensure you have:
 
-Open a terminal, navigate to the folder where you want to keep the project (e.g. your Desktop or a `Projects` folder), and run:
+1. **Node.js 20+** and **npm** installed
+2. **PostgreSQL database** (local or cloud via Neon/Render)
+3. **AWS S3 bucket** (or Backblaze B2) for document storage
+4. **Resend account** for email (or SendGrid)
+5. **Git** for version control
+
+---
+
+## 🚀 Quick Start (Development)
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/Fujiorange/DocuRoute.git
 cd DocuRoute
 ```
 
-You are now inside the project folder.
-
----
-
-### Step 4 — Install Project Dependencies
-
-The project relies on third-party libraries (called "packages"). Install them with:
+### 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-This may take a minute or two. You will see a progress bar. When it finishes you will be back at the command prompt.
+### 3. Set Up Environment Variables
 
----
+Copy `.env.example` to `.env.local` and fill in your values:
 
-### Step 5 — Create the Environment File
-
-The app needs a file called `.env.local` to know your database credentials and other settings. This file is **never committed to Git** because it contains secrets — you must create it yourself.
-
-#### 5a. Copy the example file
-
-A template is provided in `.env.example`. Copy it to create your own `.env.local`:
-
-**macOS / Linux:**
 ```bash
 cp .env.example .env.local
 ```
 
-**Windows (Command Prompt):**
-```cmd
-copy .env.example .env.local
-```
+**Required environment variables:**
 
-**Windows (PowerShell):**
-```powershell
-Copy-Item .env.example .env.local
-```
+```env
+# Database
+DATABASE_URL="postgresql://user:password@host:5432/database"
 
-#### 5b. Open `.env.local` in a text editor
-
-Open the file with any text editor (Notepad, VS Code, etc.). You will see:
-
-```
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
-JWT_SECRET="change-me-to-a-long-random-secret-at-least-32-chars"
+# Authentication
+JWT_SECRET="your-64-char-random-hex-string"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+
+# AWS S3 Storage
+AWS_ACCESS_KEY_ID="your-aws-access-key"
+AWS_SECRET_ACCESS_KEY="your-aws-secret"
+AWS_REGION="ap-southeast-1"
+AWS_S3_BUCKET="your-bucket-name"
+
+# Encryption (32 bytes / 64 hex chars)
+ENCRYPTION_KEY="your-64-char-encryption-key"
+
+# Email (Resend)
+RESEND_API_KEY="re_your-resend-api-key"
+EMAIL_FROM="noreply@yourdomain.com"
+
+# Optional: Sentry
+SENTRY_DSN="https://your-sentry-dsn@sentry.io/project"
 ```
 
-#### 5c. Fill in each value
+Generate secure secrets:
 
-**`DATABASE_URL`** — Replace the placeholder with your actual connection string from Step 2.
-
-- If you used Neon:
-  ```
-  DATABASE_URL="postgresql://alex:AbC123dEf@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb?sslmode=require"
-  ```
-- If you installed PostgreSQL locally:
-  ```
-  DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@localhost:5432/docuroute"
-  ```
-
-**`JWT_SECRET`** — This must be a long, random string of at least 32 characters. It is used to sign login tokens and must be kept secret. Generate one by running this command in your terminal:
-
-**macOS / Linux / PowerShell / Git Bash:**
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# Generate JWT_SECRET and ENCRYPTION_KEY
+node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-**Windows Command Prompt:**
-```cmd
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+### 4. Set Up Database
 
-> **Windows tip**: If the above command gives an error in Command Prompt, open **PowerShell** or **Git Bash** instead and run the same command there.
-
-Copy the output (a 64-character hex string) and paste it as the value:
-
-```
-JWT_SECRET="a3f1c9e2b7d4082e5a6f3c1d9e0b2a4f7c8e1d3b5a9f2c0e4d7b1a8f3c6e9d2"
-```
-
-**`NEXT_PUBLIC_APP_URL`** — Leave this as-is for local development:
-
-```
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-```
-
-#### 5d. Save the file
-
-Make sure you save `.env.local` after making your changes.
-
-Your finished `.env.local` should look something like this (with your real values):
-
-```
-DATABASE_URL="postgresql://postgres:mypassword@localhost:5432/docuroute"
-JWT_SECRET="a3f1c9e2b7d4082e5a6f3c1d9e0b2a4f7c8e1d3b5a9f2c0e4d7b1a8f3c6e9d2"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-```
-
----
-
-### Step 6 — Run Database Migrations
-
-Migrations create the required tables and structure inside your database. Run:
+Run Prisma migrations:
 
 ```bash
 npx prisma migrate dev
 ```
 
-When prompted for a migration name, you can type anything (e.g. `init`) or just press Enter.
+This creates all necessary tables in your database.
 
-If the command succeeds you will see a message like `Your database is now in sync with your schema.`
-
-> **Troubleshooting**: If you see a connection error, double-check that your `DATABASE_URL` in `.env.local` is correct and that your database is running.
-
----
-
-### Step 7 — Start the Development Server
+### 5. Start Development Server
 
 ```bash
 npm run dev
 ```
 
-You will see output like:
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### 6. Create Your First Account
+
+1. Go to `/register`
+2. Fill in company name, your name, email, and password
+3. You'll be registered as the **IT Admin** of your company
+4. Start inviting team members!
+
+---
+
+## 🌐 Production Deployment
+
+### Deploy to Vercel (Recommended)
+
+1. **Push to GitHub**
+
+```bash
+git add .
+git commit -m "Ready for production"
+git push origin main
+```
+
+2. **Connect to Vercel**
+
+   - Go to [vercel.com](https://vercel.com)
+   - Import your GitHub repository
+   - Vercel auto-detects Next.js
+
+3. **Add Environment Variables**
+
+   In Vercel dashboard → Settings → Environment Variables, add all production values:
+
+   - `DATABASE_URL` (Neon PostgreSQL recommended)
+   - `JWT_SECRET`
+   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_S3_BUCKET`
+   - `ENCRYPTION_KEY`
+   - `RESEND_API_KEY`, `EMAIL_FROM`
+   - `SENTRY_DSN` (optional)
+   - `NEXT_PUBLIC_APP_URL` (your Vercel URL, e.g., `https://docuroute.vercel.app`)
+
+4. **Deploy**
+
+   Vercel automatically builds and deploys. Visit your production URL!
+
+### Deploy to Render
+
+1. **Create Web Service**
+
+   - Go to [render.com](https://render.com)
+   - New → Web Service
+   - Connect your GitHub repo
+
+2. **Configure Build**
+
+   - Build Command: `npm install && npx prisma generate && npm run build`
+   - Start Command: `npm start`
+
+3. **Add Environment Variables**
+
+   Same as Vercel (see above).
+
+4. **Deploy**
+
+   Render builds and deploys automatically.
+
+---
+
+## 🗄️ Database Migrations
+
+### Create a New Migration
+
+After modifying `prisma/schema.prisma`:
+
+```bash
+npx prisma migrate dev --name your_migration_name
+```
+
+### Apply Migrations in Production
+
+```bash
+npx prisma migrate deploy
+```
+
+### Reset Database (Development Only)
+
+```bash
+npx prisma migrate reset
+```
+
+---
+
+## 📧 Email Setup
+
+### Using Resend (Recommended)
+
+1. Sign up at [resend.com](https://resend.com)
+2. Verify your domain (or use resend.dev for testing)
+3. Get your API key
+4. Set `RESEND_API_KEY` in `.env.local`
+
+### Using SendGrid (Alternative)
+
+1. Sign up at [sendgrid.com](https://sendgrid.com)
+2. Get your API key
+3. Update `lib/email.ts` to use SendGrid SDK
+4. Set `SENDGRID_API_KEY` in `.env.local`
+
+---
+
+## 🔐 Security Best Practices
+
+### JWT & Cookies
+- JWT tokens stored in httpOnly cookies (XSS protection)
+- 7-day expiration
+- Secure flag enabled in production
+
+### Password Requirements
+- Minimum 8 characters
+- Hashed with bcryptjs (10 rounds)
+
+### 2FA
+- TOTP-based (compatible with Google Authenticator, Authy)
+- 2-step time window for clock drift
+
+### Rate Limiting
+- 100 requests per 15 minutes per IP (configurable)
+- Adjust via `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`
+
+### File Upload
+- Maximum 200 MB per file (configurable via `MAX_FILE_SIZE`)
+- AES-256 encryption at rest
+- S3 server-side encryption (SSE-S3)
+
+### Audit Logging
+- All mutations logged with user, timestamp, IP
+- Stored in PostgreSQL for 7 years (Singapore compliance)
+
+---
+
+## 👥 Roles & Permissions
+
+| Role | Permissions |
+|------|------------|
+| **IT Admin** | Full access: manage company, users, projects, documents, settings |
+| **Project Admin** | Create/manage projects, invite users, approve documents |
+| **Engineer** | Upload/edit documents, view all, comment, cannot delete |
+| **Client** | View-only access to specific folders, download, comment |
+
+---
+
+## 📊 PDPA/GDPR Compliance
+
+### Data Export
+
+Users can export all their data:
 
 ```
-▲ Next.js 15.x.x (Turbopack)
-- Local:        http://localhost:3000
+GET /api/pdpa/export?format=json  // or format=csv
 ```
 
-Open your browser and go to [http://localhost:3000](http://localhost:3000).
+Exports:
+- User profile
+- Documents metadata
+- Comments
+- Audit logs (last 1000)
+
+### Account Deletion
+
+Request deletion with 30-day grace period:
+
+```
+POST /api/pdpa/delete-account
+```
+
+User is deactivated immediately, permanent deletion after 30 days.
+
+### Data Retention
+
+- Documents: 7 years (Singapore construction industry standard)
+- Audit logs: 7 years
+- Configurable via `DATA_RETENTION_DAYS`
 
 ---
 
-### Step 8 — Create Your First Account
+## 🧪 Testing
 
-1. Click **"Register"** (or go to [http://localhost:3000/register](http://localhost:3000/register))
-2. Fill in your company name, your name, email address, and a password
-3. Click **"Create Account"** — this automatically creates your company and assigns you the **IT Admin** role
-4. You are now logged in and can start using DocuRoute
+### Run Unit Tests
 
----
+```bash
+npm test
+```
 
-## Deployment (Render)
+### Run Tests in Watch Mode
 
-To deploy DocuRoute to the internet using [Render](https://render.com):
+```bash
+npm run test:watch
+```
 
-1. Push your code to a GitHub repository
-2. Go to [https://render.com](https://render.com) and sign in (or create a free account)
-3. Click **"New +"** → **"Web Service"** and connect your GitHub repository
-4. Render will detect `render.yaml` automatically
-5. Add the following environment variables in the Render dashboard under **Environment**:
-   - `DATABASE_URL` — your production PostgreSQL connection string (Neon or Render PostgreSQL)
-   - `JWT_SECRET` — a new, strong random secret (generate one as shown in Step 5c above)
-   - `NEXT_PUBLIC_APP_URL` — your Render app URL (e.g. `https://docuroute.onrender.com`)
-6. Click **"Create Web Service"** — Render will install dependencies, run migrations, build, and start the app
+### Run Tests with Coverage
+
+```bash
+npm run test:coverage
+```
 
 ---
 
-## Features (Phase 1)
+## 📁 Project Structure
 
-- **Authentication**: Register (creates company + IT Admin), Login, Logout
-- **Multi-tenancy**: Each company has isolated data
-- **Projects**: Create and manage construction projects
-- **Documents**: Upload, download, and delete project documents
-- **Team**: Invite team members by email (email sending stubbed — invitation link is printed to the server console)
-- **Settings**: Update company name (IT Admin only)
+```
+DocuRoute/
+├── app/                      # Next.js App Router
+│   ├── api/                  # API routes
+│   │   ├── auth/             # Authentication (login, register, 2FA, password reset)
+│   │   ├── documents-v2/     # S3-based document management
+│   │   ├── folders/          # Folder management
+│   │   ├── pdpa/             # PDPA compliance (export, delete)
+│   │   ├── search/           # Full-text search
+│   │   └── analytics/        # Analytics and reporting
+│   ├── dashboard/            # Dashboard pages
+│   ├── login/                # Login page
+│   └── register/             # Registration page
+├── components/               # React components
+│   └── ui/                   # shadcn/ui components
+├── lib/                      # Utility libraries
+│   ├── auth.ts               # JWT auth helpers
+│   ├── prisma.ts             # Prisma client
+│   ├── storage.ts            # S3 storage with encryption
+│   ├── email.ts              # Email service (Resend)
+│   ├── two-factor.ts         # TOTP 2FA
+│   ├── permissions.ts        # RBAC permissions
+│   ├── audit.ts              # Audit logging
+│   ├── rate-limit.ts         # Rate limiting
+│   ├── errors.ts             # Error handling
+│   └── pdpa.ts               # PDPA compliance tools
+├── prisma/                   # Database
+│   └── schema.prisma         # Database schema
+├── public/                   # Static assets
+├── .env.example              # Environment variables template
+├── package.json              # Dependencies
+└── README.md                 # This file
+```
 
-## File Storage Note
+---
 
-Uploaded files are stored locally in `/public/uploads/`. On Render, the filesystem is ephemeral — uploaded files will be lost on restart or redeploy. This is expected for the Phase 1 demo. Phase 2 will migrate to cloud storage (Backblaze B2 / S3).
+## 🐛 Troubleshooting
 
-## Roles
+### Database Connection Issues
 
-| Role | Description |
-|------|-------------|
-| `it_admin` | Full access: manage company settings, invite users, manage all projects |
-| `project_admin` | Can create/manage projects and invite users |
-| `engineer` | Can upload and download documents |
-| `client` | Read-only access to documents |
+```bash
+# Test connection
+npx prisma db pull
+```
+
+If it fails, verify `DATABASE_URL` in `.env.local`.
+
+### S3 Upload Failures
+
+- Check AWS credentials are correct
+- Verify bucket exists and region matches
+- Ensure IAM user has `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` permissions
+
+### Email Not Sending
+
+- Verify `RESEND_API_KEY` is set
+- Check Resend dashboard for domain verification
+- In development, emails are logged to console if `RESEND_API_KEY` is missing
+
+### Build Errors
+
+```bash
+# Clear cache and rebuild
+rm -rf .next
+npm run build
+```
+
+---
+
+## 📝 API Documentation
+
+### Authentication
+
+- `POST /api/auth/register` - Register new company + admin user
+- `POST /api/auth/login` - Login with email/password
+- `POST /api/auth/logout` - Logout (clear cookie)
+- `GET /api/auth/me` - Get current user
+- `POST /api/auth/password-reset/request` - Request password reset
+- `POST /api/auth/password-reset/confirm` - Confirm password reset
+- `POST /api/auth/2fa/setup` - Generate 2FA secret + QR code
+- `POST /api/auth/2fa/verify` - Verify 2FA token and enable
+
+### Documents
+
+- `GET /api/documents-v2` - List documents (with filters)
+- `POST /api/documents-v2` - Upload document to S3
+- `GET /api/documents-v2/[id]/download` - Get signed download URL
+- `POST /api/documents-v2/[id]/approval` - Change approval status
+- `GET /api/documents-v2/[id]/comments` - Get comments
+- `POST /api/documents-v2/[id]/comments` - Add comment
+
+### Folders
+
+- `GET /api/folders` - List folders
+- `POST /api/folders` - Create folder
+
+### Search
+
+- `GET /api/search?q=query` - Full-text search documents
+
+### Analytics
+
+- `GET /api/analytics` - Get company analytics (IT Admin only)
+
+### PDPA
+
+- `GET /api/pdpa/export?format=json` - Export user data
+- `POST /api/pdpa/delete-account` - Request account deletion
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- Built with [Next.js](https://nextjs.org/)
+- UI components from [shadcn/ui](https://ui.shadcn.com/)
+- Database powered by [Prisma](https://www.prisma.io/)
+- Email by [Resend](https://resend.com/)
+- Storage by [AWS S3](https://aws.amazon.com/s3/)
+
+---
+
+## 📞 Support
+
+For issues, questions, or feature requests:
+
+- **GitHub Issues**: [https://github.com/Fujiorange/DocuRoute/issues](https://github.com/Fujiorange/DocuRoute/issues)
+- **Email**: support@docuroute.com
+
+---
+
+**Made with ❤️ for Singapore construction and engineering companies**
