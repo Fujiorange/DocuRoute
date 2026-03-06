@@ -10,17 +10,22 @@ datasource db {
 }
 
 model Company {
-  id        String   @id @default(cuid())
-  name      String
-  subdomain String?  @unique
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  subdomain    String?  @unique
+  isActive     Boolean  @default(true)
+  logoUrl      String?
+  storageLimit BigInt   @default(107374182400) // 100 GB in bytes
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  users       User[]
-  projects    Project[]
-  documents   Document[]
-  invitations Invitation[]
+  users            User[]
+  projects         Project[]
+  documents        Document[]
+  invitations      Invitation[]
+  folders          Folder[]
+  auditLogs        AuditLog[]
+  passwordResets   PasswordReset[]
 }
 
 model User {
@@ -28,18 +33,25 @@ model User {
   email        String
   passwordHash String
   name         String
-  role         String   @default("engineer")
+  role         String   @default("engineer") // it_admin, project_admin, engineer, client
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive         Boolean  @default(true)
+  twoFactorEnabled Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  projects    Project[]
-  documents   Document[]
-  invitations Invitation[]
+  projects             Project[]
+  documents            Document[]
+  invitations          Invitation[]
+  twoFactorSecret      TwoFactorSecret?
+  auditLogs            AuditLog[]
+  comments             Comment[]
+  createdFolders       Folder[]            @relation("FolderCreator")
+  documentVersions     DocumentVersion[]
+  approvals            Document[]          @relation("DocumentApprover")
 
   @@unique([companyId, email])
 }
@@ -59,6 +71,7 @@ model Project {
   updatedAt DateTime @updatedAt
 
   documents Document[]
+  folders   Folder[]
 
   @@unique([companyId, name])
 }
@@ -68,10 +81,23 @@ model Document {
   title       String
   description String?
 
-  filePath String
-  fileName String
-  fileSize Int
-  mimeType String
+  // S3 storage
+  s3Key        String
+  s3Bucket     String
+  fileName     String
+  fileSize     BigInt
+  mimeType     String
+  isEncrypted  Boolean @default(true)
+
+  // Metadata
+  tags         String[] // Array of tags for categorization
+  phase        String?  // project phase (e.g., "design", "construction", "handover")
+
+  // Approval workflow
+  status       String   @default("draft") // draft, pending, approved, rejected
+  approvedById String?
+  approvedBy   User?    @relation("DocumentApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -79,13 +105,22 @@ model Document {
   projectId String?
   project   Project? @relation(fields: [projectId], references: [id])
 
+  folderId String?
+  folder   Folder? @relation(fields: [folderId], references: [id])
+
   uploadedById String
   uploadedBy   User   @relation(fields: [uploadedById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  versions DocumentVersion[]
+  comments Comment[]
+
   @@index([companyId])
+  @@index([projectId])
+  @@index([folderId])
+  @@index([status])
 }
 
 model Invitation {
@@ -106,4 +141,124 @@ model Invitation {
   createdAt  DateTime  @default(now())
 
   @@unique([companyId, email])
+}
+
+model Folder {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  parentId String?
+  parent   Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Folder[] @relation("FolderHierarchy")
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("FolderCreator", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents Document[]
+
+  @@unique([companyId, projectId, parentId, name])
+  @@index([companyId])
+  @@index([projectId])
+}
+
+model DocumentVersion {
+  id           String   @id @default(cuid())
+  versionNumber Int
+  s3Key        String
+  s3Bucket     String
+  fileSize     BigInt
+  changeNote   String?
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId])
+}
+
+model Comment {
+  id      String  @id @default(cuid())
+  content String
+  isEdited Boolean @default(false)
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  parentId String?
+  parent   Comment?  @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[] @relation("CommentThread")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([documentId])
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String   // e.g., "document.upload", "document.delete", "user.login", etc.
+  entity    String   // e.g., "Document", "User", "Project"
+  entityId  String?
+  details   Json?    // Additional context as JSON
+  ipAddress String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model TwoFactorSecret {
+  id     String @id @default(cuid())
+  secret String
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PasswordReset {
+  id    String @id @default(cuid())
+  token String @unique
+  email String
+
+  expiresAt DateTime
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([token])
 }
