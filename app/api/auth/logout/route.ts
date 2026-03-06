@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
           }),
           ipAddress,
         },
-      }).catch((error) => {
+      }).catch((error: unknown) => {
         // Don't fail logout if audit log creation fails
         console.error("Failed to create logout audit log:", error);
       });

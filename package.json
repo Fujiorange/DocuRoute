@@ -17,6 +17,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
+    "screenshot": "tsx screenshot-pages.ts",
     "pretest": "prisma generate",
     "postinstall": "prisma generate"
   },
@@ -56,6 +57,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/json2csv": "^5.0.7",
@@ -70,8 +72,10 @@
     "@vitest/ui": "^4.0.18",
     "dotenv": "^17.3.1",
     "json2csv": "^6.0.0-alpha.2",
+    "playwright": "^1.58.2",
     "supertest": "^7.1.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.0.18"
   }
