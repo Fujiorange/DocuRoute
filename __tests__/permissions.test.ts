@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { hasPermission, Permission, Role, canAccessFolder } from "@/lib/permissions";
+import {
+  hasPermission,
+  hasAnyPermission,
+  hasAllPermissions,
+  getRolePermissions,
+  Permission,
+  Role,
+  canAccessFolder,
+} from "@/lib/permissions";
 
 describe("RBAC Permissions", () => {
   it("IT Admin should have all permissions", () => {
@@ -40,11 +48,11 @@ describe("RBAC Permissions", () => {
   });
 
   it("hasPermission returns false for unknown role string", () => {
-    expect(hasPermission("unknown_role" as any, Permission.DOCUMENT_VIEW)).toBe(false);
+    expect(hasPermission("unknown_role" as Role, Permission.DOCUMENT_VIEW)).toBe(false);
   });
 
   it("hasPermission returns false for empty string role", () => {
-    expect(hasPermission("" as any, Permission.DOCUMENT_VIEW)).toBe(false);
+    expect(hasPermission("" as Role, Permission.DOCUMENT_VIEW)).toBe(false);
   });
 
   it("canAccessFolder allows non-client roles without folder list", () => {
@@ -62,5 +70,68 @@ describe("RBAC Permissions", () => {
     const allowedFolders = ["folder1", "folder2"];
     expect(canAccessFolder(Role.CLIENT, "folder1", allowedFolders)).toBe(true);
     expect(canAccessFolder(Role.CLIENT, "folder2", allowedFolders)).toBe(true);
+  });
+
+  // hasAnyPermission tests
+  it("hasAnyPermission returns true if role has at least one of the permissions", () => {
+    expect(
+      hasAnyPermission(Role.CLIENT, [Permission.DOCUMENT_VIEW, Permission.DOCUMENT_DELETE])
+    ).toBe(true);
+    expect(
+      hasAnyPermission(Role.CLIENT, [Permission.DOCUMENT_CREATE, Permission.DOCUMENT_DELETE])
+    ).toBe(false);
+  });
+
+  it("hasAnyPermission returns false when no permissions match", () => {
+    expect(
+      hasAnyPermission(Role.CLIENT, [Permission.COMPANY_UPDATE, Permission.USER_INVITE])
+    ).toBe(false);
+  });
+
+  it("hasAnyPermission returns false for unknown role", () => {
+    expect(
+      hasAnyPermission("unknown_role" as Role, [Permission.DOCUMENT_VIEW])
+    ).toBe(false);
+  });
+
+  // hasAllPermissions tests
+  it("hasAllPermissions returns true only when role has every permission", () => {
+    expect(
+      hasAllPermissions(Role.IT_ADMIN, [Permission.DOCUMENT_CREATE, Permission.DOCUMENT_DELETE])
+    ).toBe(true);
+    expect(
+      hasAllPermissions(Role.CLIENT, [Permission.DOCUMENT_VIEW, Permission.DOCUMENT_DELETE])
+    ).toBe(false);
+  });
+
+  it("hasAllPermissions returns false when any permission is missing", () => {
+    expect(
+      hasAllPermissions(Role.ENGINEER, [Permission.DOCUMENT_CREATE, Permission.DOCUMENT_APPROVE])
+    ).toBe(false);
+  });
+
+  it("hasAllPermissions returns false for unknown role", () => {
+    expect(
+      hasAllPermissions("unknown_role" as Role, [Permission.DOCUMENT_VIEW])
+    ).toBe(false);
+  });
+
+  // getRolePermissions tests
+  it("getRolePermissions returns the full permission list for IT_ADMIN", () => {
+    const perms = getRolePermissions(Role.IT_ADMIN);
+    expect(perms).toContain(Permission.COMPANY_UPDATE);
+    expect(perms).toContain(Permission.DOCUMENT_DELETE);
+    expect(perms).toContain(Permission.AUDIT_LOG_VIEW);
+    expect(perms.length).toBeGreaterThan(0);
+  });
+
+  it("getRolePermissions returns fewer permissions for CLIENT than for IT_ADMIN", () => {
+    const adminPerms = getRolePermissions(Role.IT_ADMIN);
+    const clientPerms = getRolePermissions(Role.CLIENT);
+    expect(clientPerms.length).toBeLessThan(adminPerms.length);
+  });
+
+  it("getRolePermissions returns empty array for unknown role", () => {
+    expect(getRolePermissions("unknown_role" as Role)).toEqual([]);
   });
 });
