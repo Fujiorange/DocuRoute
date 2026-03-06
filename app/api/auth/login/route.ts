@@ -1,15 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { signToken, setAuthCookie } from "@/lib/auth";
 
+const loginSchema = z.object({
+  email: z.string().email("Invalid email address").max(255),
+  password: z.string().min(1, "Password is required").max(255),
+});
+
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json();
 
-    if (!email || !password) {
-      return NextResponse.json({ error: "Email and password required" }, { status: 400 });
+    const validation = loginSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validation.error.flatten().fieldErrors },
+        { status: 400 }
+      );
     }
+
+    const { email, password } = validation.data;
 
     const user = await prisma.user.findFirst({
       where: { email, isActive: true },

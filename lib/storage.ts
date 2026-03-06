@@ -31,9 +31,10 @@ export class DecryptionError extends Error {
 
 /**
  * Encrypt data using AES-256-GCM with authentication tag
+ * Uses 12-byte IV (96 bits) as recommended for GCM mode
  */
 function encrypt(data: Buffer): { encrypted: Buffer; iv: string; authTag: string } {
-  const iv = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12); // 12 bytes for GCM (recommended)
   const key = Buffer.from(ENCRYPTION_KEY, "hex").slice(0, 32);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
 

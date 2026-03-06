@@ -1,15 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { signToken, setAuthCookie } from "@/lib/auth";
 
+const registerSchema = z.object({
+  companyName: z.string().min(2, "Company name must be at least 2 characters").max(100),
+  email: z.string().email("Invalid email address").max(255),
+  password: z.string().min(8, "Password must be at least 8 characters").max(255),
+  name: z.string().min(2, "Name must be at least 2 characters").max(100),
+});
+
 export async function POST(req: NextRequest) {
   try {
-    const { companyName, email, password, name } = await req.json();
+    const body = await req.json();
 
-    if (!companyName || !email || !password || !name) {
-      return NextResponse.json({ error: "All fields are required" }, { status: 400 });
+    const validation = registerSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validation.error.flatten().fieldErrors },
+        { status: 400 }
+      );
     }
+
+    const { companyName, email, password, name } = validation.data;
 
     const existingUser = await prisma.user.findFirst({
       where: { email },

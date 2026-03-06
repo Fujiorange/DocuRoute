@@ -14,11 +14,11 @@ describe('Document Encryption', () => {
     const originalContent = 'Sensitive project document';
     const buffer = Buffer.from(originalContent);
 
-    // Mock S3 upload by testing encryption directly
+    // Test encryption with correct 12-byte IV for GCM
     const cipher = crypto.createCipheriv(
       'aes-256-gcm',
       Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex').slice(0, 32),
-      crypto.randomBytes(16)
+      crypto.randomBytes(12) // 12 bytes for GCM (recommended)
     );
 
     const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
@@ -76,7 +76,7 @@ describe('Document Encryption', () => {
     // Test with manual encryption/decryption
     const correctKey = Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex').slice(0, 32);
     const wrongKey = Buffer.from('fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210', 'hex').slice(0, 32);
-    const iv = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12); // 12 bytes for GCM
 
     // Encrypt with correct key
     const cipher = crypto.createCipheriv('aes-256-gcm', correctKey, iv);
@@ -95,7 +95,7 @@ describe('Document Encryption', () => {
     const originalContent = 'Secret document';
     const buffer = Buffer.from(originalContent);
     const key = Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex').slice(0, 32);
-    const iv = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12); // 12 bytes for GCM
 
     // Encrypt with correct key
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -117,7 +117,7 @@ describe('Document Encryption', () => {
   it('should handle large file encryption', async () => {
     const largeContent = crypto.randomBytes(5 * 1024 * 1024); // 5MB
     const key = Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex').slice(0, 32);
-    const iv = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12); // 12 bytes for GCM
 
     // Encrypt
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -137,7 +137,7 @@ describe('Document Encryption', () => {
     const originalContent = 'Critical data that must not be tampered with';
     const buffer = Buffer.from(originalContent);
     const key = Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex').slice(0, 32);
-    const iv = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12); // 12 bytes for GCM
 
     // Encrypt
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -175,8 +175,8 @@ describe('Document Encryption', () => {
       expect(typeof result.iv).toBe('string');
       expect(typeof result.authTag).toBe('string');
 
-      // Verify hex format (32 chars for 16-byte IV, 32 chars for 16-byte authTag)
-      expect(result.iv?.length).toBe(32);
+      // Verify hex format (24 chars for 12-byte IV, 32 chars for 16-byte authTag)
+      expect(result.iv?.length).toBe(24);
       expect(result.authTag?.length).toBe(32);
     } catch (error) {
       if (error instanceof Error && error.message.includes('Could not load credentials')) {
