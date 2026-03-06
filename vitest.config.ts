@@ -5,7 +5,26 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    setupFiles: ["./vitest.setup.ts"],
+    setupFiles: ["./tests/helpers/setup.ts"],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html', 'lcov'],
+      exclude: [
+        'node_modules/**',
+        'tests/**/*.ts',
+        '**/*.d.ts',
+        '**/*.config.ts',
+        'app/**/*.tsx', // UI components
+        '.next/**',
+        'prisma/**',
+      ],
+      thresholds: {
+        lines: 65,
+        functions: 60,
+        branches: 50,
+        statements: 65,
+      },
+    },
   },
   resolve: {
     alias: {
