@@ -9,6 +9,13 @@ datasource db {
   provider = "postgresql"
 }
 
+enum UserRole {
+  it_admin
+  project_admin
+  engineer
+  client
+}
+
 model Company {
   id           String   @id @default(cuid())
   name         String
@@ -33,7 +40,7 @@ model User {
   email        String
   passwordHash String
   name         String
-  role         String   @default("engineer") // it_admin, project_admin, engineer, client
+  role         UserRole @default(engineer)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -126,10 +133,10 @@ model Document {
 }
 
 model Invitation {
-  id    String @id @default(cuid())
+  id    String   @id @default(cuid())
   email String
-  role  String
-  token String @unique
+  role  UserRole
+  token String   @unique
 
   expiresAt DateTime
 
@@ -141,8 +148,6 @@ model Invitation {
 
   acceptedAt DateTime?
   createdAt  DateTime  @default(now())
-
-  @@unique([companyId, email])
 }
 
 model Folder {
