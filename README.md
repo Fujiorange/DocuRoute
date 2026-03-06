@@ -1,4 +1,6 @@
-# DocuRoute - Production-Grade Document Management SaaS
+# DocuRoute — Developer Guide
+
+> **Looking for the marketing/product overview?** See [README.marketing.md](README.marketing.md)
 
 **Enterprise document management platform for Singapore construction and engineering companies**
 
@@ -9,7 +11,316 @@
 
 ---
 
-## 🚀 Features
+## What is DocuRoute?
+
+DocuRoute is a full-stack SaaS application built with Next.js 15 (App Router). It provides:
+- Secure document storage (AWS S3 + AES-256-GCM encryption)
+- Multi-tenant isolation (each company has a completely separate data space)
+- Role-based access control (4 roles: IT Admin, Project Admin, Engineer, Client)
+- Document approval workflows, version control, commenting, and full-text search
+- PDPA-compliant data handling for Singapore businesses
+
+This README is the **developer guide**. It explains how to set up the project locally, understand the architecture, and contribute code.
+
+---
+
+## Prerequisites
+
+Before you start, install these tools:
+
+- **Node.js 20+** — [Download from nodejs.org](https://nodejs.org/)
+- **npm 10+** — Comes with Node.js
+- **PostgreSQL 14+** — [Download from postgresql.org](https://www.postgresql.org/download/) OR use [Neon](https://neon.tech) (free, serverless PostgreSQL)
+- **Git** — [Download from git-scm.com](https://git-scm.com/)
+- **AWS Account** — [Sign up at aws.amazon.com](https://aws.amazon.com/) (for S3 file storage)
+- **Resend Account** — [Sign up at resend.com](https://resend.com) (for email sending)
+
+---
+
+## Local Development Setup
+
+Follow these steps **in order**:
+
+### Step 1: Clone the repository
+```bash
+git clone https://github.com/Fujiorange/DocuRoute
+cd DocuRoute
+```
+
+### Step 2: Install dependencies
+```bash
+npm install
+```
+This installs all packages listed in `package.json`. It will also automatically run `prisma generate`.
+
+### Step 3: Set up environment variables
+```bash
+cp .env.example .env
+```
+Then open `.env` and fill in your values. See the [Environment Variables Reference](#environment-variables-reference) section below for what each variable does.
+
+### Step 4: Set up the database
+
+**Option A: Local PostgreSQL**
+1. Create a new database: `createdb docuroute_dev`
+2. Set `DATABASE_URL=postgresql://postgres:password@localhost:5432/docuroute_dev` in `.env`
+
+**Option B: Neon (recommended for development)**
+1. Go to [neon.tech](https://neon.tech), create a free account
+2. Create a new project, copy the connection string
+3. Set `DATABASE_URL=<your-neon-connection-string>` in `.env`
+
+Then run migrations to create all tables:
+```bash
+npx prisma migrate dev
+```
+This reads `prisma/schema.prisma`, generates SQL, and runs it against your database. You'll see a list of tables created.
+
+### Step 5: Generate the Prisma client
+```bash
+npx prisma generate
+```
+This generates the TypeScript types for your database queries.
+
+### Step 6: Start the development server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000). You should see the landing page.
+
+### Step 7: Create your first account
+Go to [http://localhost:3000/register](http://localhost:3000/register) and register. This creates both a Company and a User (IT Admin role).
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Description | Where to Get It | Example |
+|----------|----------|-------------|-----------------|---------|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string | Your DB provider | `postgresql://user:pass@host/db` |
+| `DIRECT_URL` | For Neon | Direct URL for migrations (bypasses pooler) | Neon dashboard | `postgresql://user:pass@host/db` |
+| `JWT_SECRET` | ✅ | Secret for signing JWT tokens | Generate: `openssl rand -hex 32` | `abc123...` (64 hex chars) |
+| `ENCRYPTION_KEY` | ✅ | 32-byte key for AES-256-GCM | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | `0123...abcdef` (64 hex chars) |
+| `NEXT_PUBLIC_APP_URL` | ✅ | Your app's public URL | Your deployment URL | `https://app.docuroute.com` |
+| `AWS_ACCESS_KEY_ID` | ✅ | AWS IAM access key | AWS Console → IAM | `AKIA...` |
+| `AWS_SECRET_ACCESS_KEY` | ✅ | AWS IAM secret key | AWS Console → IAM | `wJalrXUtnFEM...` |
+| `AWS_REGION` | ✅ | AWS region for S3 | Use `ap-southeast-1` for Singapore | `ap-southeast-1` |
+| `AWS_S3_BUCKET` | ✅ | S3 bucket name | Your S3 bucket name | `docuroute-documents` |
+| `RESEND_API_KEY` | ✅ | Resend API key for emails | [resend.com/api-keys](https://resend.com/api-keys) | `re_...` |
+| `EMAIL_FROM` | ✅ | Sender email address | Your verified domain | `noreply@docuroute.com` |
+| `UPSTASH_REDIS_REST_URL` | Optional | Redis URL for rate limiting | [upstash.com](https://upstash.com) | `https://...upstash.io` |
+| `UPSTASH_REDIS_REST_TOKEN` | Optional | Redis token | Upstash console | `AX4...` |
+| `SENTRY_DSN` | Optional | Sentry error tracking | [sentry.io](https://sentry.io) | `https://...@sentry.io/...` |
+
+**Note:** If `UPSTASH_REDIS_REST_URL` is not set, the app falls back to in-memory rate limiting (fine for development).
+
+---
+
+## Project Structure
+
+```
+DocuRoute/
+├── app/                        # Next.js App Router pages and API routes
+│   ├── api/                    # All API endpoints
+│   │   ├── auth/               # Login, register, logout, 2FA, password reset
+│   │   ├── documents-v2/       # Document CRUD, comments, downloads, approvals
+│   │   ├── projects/           # Project management
+│   │   ├── team/               # Team members listing
+│   │   ├── invitations/        # Team invitations
+│   │   ├── analytics/          # Analytics data
+│   │   ├── company/            # Company settings
+│   │   ├── folders/            # Folder management
+│   │   ├── search/             # Full-text search
+│   │   ├── pdpa/               # PDPA data export/deletion
+│   │   └── health/             # Health check endpoint
+│   ├── dashboard/              # Authenticated dashboard pages
+│   │   ├── page.tsx            # Dashboard overview
+│   │   ├── layout.tsx          # Dashboard layout with sidebar
+│   │   ├── documents/          # Documents listing + detail page
+│   │   ├── projects/           # Projects listing + detail
+│   │   ├── team/               # Team management
+│   │   ├── analytics/          # Analytics dashboard
+│   │   └── settings/           # Account & company settings
+│   ├── onboarding/             # First-run onboarding wizard
+│   ├── pricing/                # Marketing pricing page
+│   ├── login/                  # Login page
+│   ├── register/               # Registration page
+│   ├── invite/                 # Invitation acceptance
+│   ├── page.tsx                # Landing page (marketing)
+│   ├── layout.tsx              # Root layout
+│   ├── not-found.tsx           # 404 error page
+│   ├── error.tsx               # Global error boundary
+│   └── loading.tsx             # Global loading state
+├── components/                 # Reusable React components
+│   ├── ui/                     # shadcn/ui base components (Button, Input, etc.)
+│   ├── document-upload.tsx     # Drag-and-drop upload component
+│   ├── file-type-icon.tsx      # File type icon by MIME type
+│   ├── status-badge.tsx        # Document status badge
+│   └── skeleton-card.tsx       # Loading skeleton components
+├── lib/                        # Server-side utility functions
+│   ├── auth.ts                 # JWT sign/verify, getCurrentUser()
+│   ├── auth-edge.ts            # JWT verification for Next.js middleware
+│   ├── prisma.ts               # Prisma client singleton
+│   ├── storage.ts              # AWS S3 upload/download with AES-256-GCM
+│   ├── email.ts                # Resend email sending
+│   ├── audit.ts                # Audit log creation
+│   ├── permissions.ts          # RBAC permission checks
+│   ├── tenant-guard.ts         # Multi-tenant isolation helpers
+│   ├── rate-limit.ts           # Rate limiting with Redis/in-memory fallback
+│   ├── two-factor.ts           # TOTP 2FA with speakeasy
+│   ├── validation.ts           # Zod schemas for all API inputs
+│   ├── errors.ts               # Custom error classes and catchAsync wrapper
+│   ├── api-response.ts         # Standard API response helpers
+│   └── pdpa.ts                 # PDPA compliance utilities
+├── prisma/
+│   ├── schema.prisma           # Database schema (10 models)
+│   └── migrations/             # SQL migration files
+├── store/
+│   └── authStore.ts            # Zustand store for auth state
+├── tests/                      # Integration tests (require a database)
+│   ├── audit/                  # Audit log tests
+│   ├── auth/                   # RBAC and permission tests
+│   ├── documents/              # Document encryption tests
+│   ├── isolation/              # Multi-tenant isolation tests
+│   ├── security/               # Rate limiting tests
+│   └── helpers/                # Test utilities and factories
+├── __tests__/                  # Unit tests (no database required)
+│   ├── lib/                    # Tests for lib/ utilities
+│   ├── permissions.test.ts     # RBAC permission tests
+│   └── two-factor.test.ts      # 2FA utility tests
+├── types/
+│   └── index.ts                # TypeScript type definitions
+├── middleware.ts               # JWT auth middleware (protects /dashboard routes)
+├── next.config.ts              # Next.js configuration
+├── tailwind.config.ts          # Tailwind CSS configuration
+├── vitest.config.ts            # Test configuration with coverage thresholds
+├── render.yaml                 # Render.com deployment config
+└── vercel.json                 # Vercel deployment config
+```
+
+---
+
+## How the Auth System Works
+
+1. **Registration:** User fills in form → `POST /api/auth/register` → password hashed with bcrypt → User + Company created in DB → JWT signed with `JWT_SECRET` → stored in httpOnly cookie (`auth_token`)
+
+2. **Login:** User submits credentials → `POST /api/auth/login` → bcrypt compare → if 2FA enabled, prompt for TOTP → JWT signed and set as cookie
+
+3. **Protected routes:** The Next.js middleware (`middleware.ts`) runs on every `/dashboard` request. It reads the `auth_token` cookie, verifies the JWT (using `lib/auth-edge.ts` which uses `jose` for Edge runtime compatibility), and redirects to `/login` if invalid.
+
+4. **API routes:** Each API handler calls `getCurrentUser()` from `lib/auth.ts`. This reads the cookie, verifies the JWT with `jsonwebtoken`, and queries the database for the full user object with company data.
+
+5. **Logout:** `POST /api/auth/logout` → clears the `auth_token` cookie.
+
+---
+
+## How Document Encryption Works
+
+Every document uploaded to DocuRoute is encrypted **before** it's sent to AWS S3:
+
+1. User uploads file → Next.js API route receives the file buffer
+2. `lib/storage.ts` → `encrypt()` function generates a random 12-byte IV
+3. `crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv)` encrypts the file
+4. The encrypted buffer, IV (hex string), and authentication tag are returned
+5. Encrypted buffer uploaded to S3 · IV and auth tag stored in the `Document` Postgres record
+6. On download: S3 returns encrypted buffer → `decrypt(buffer, iv, authTag)` → plaintext returned to user
+
+**Key management:** The `ENCRYPTION_KEY` environment variable is a 64-character hex string (32 bytes). Every file uses the same key but a **unique IV** — this is cryptographically secure per AES-GCM mode.
+
+---
+
+## How Multi-Tenancy Works
+
+Every database row that belongs to a company has a `companyId` field. The `getCurrentUser()` function always returns the user's `companyId`. All database queries are filtered by this `companyId`:
+
+```ts
+// ✅ Correct — tenant-isolated query
+prisma.document.findMany({ where: { companyId: user.companyId } })
+
+// ❌ Wrong — leaks data across tenants
+prisma.document.findMany()
+```
+
+The `lib/tenant-guard.ts` provides helper functions to enforce this. All API routes must include `companyId: user.companyId` in their Prisma `where` clauses.
+
+---
+
+## Running Tests
+
+```bash
+# Run all tests (unit + integration)
+npm test
+
+# Run in watch mode (re-runs on file change)
+npm run test:watch
+
+# Run once without watch (for CI)
+npm run test:run
+
+# Run with coverage report
+npm run test:coverage
+
+# Run specific file
+npx vitest run __tests__/permissions.test.ts
+```
+
+**Coverage thresholds** (defined in `vitest.config.ts`):
+- Lines: 65% · Functions: 60% · Branches: 50% · Statements: 65%
+
+**Note:** Integration tests in `tests/` require a running PostgreSQL database. Set `DATABASE_URL` in your `.env` before running them. Unit tests in `__tests__/` run without a database.
+
+---
+
+## Deployment
+
+### Deploy to Vercel (Recommended)
+
+1. Push your code to GitHub
+2. Go to [vercel.com](https://vercel.com) and import your repository
+3. Set all environment variables from the [reference table above](#environment-variables-reference)
+4. Vercel will auto-detect Next.js and deploy. The `vercel.json` in this repo configures it to use the Singapore region (`sin1`)
+
+**Database for Vercel:** Use [Neon](https://neon.tech) (serverless PostgreSQL). Set both `DATABASE_URL` (pooled) and `DIRECT_URL` (direct) for Prisma migrations to work.
+
+### Deploy to Render
+
+1. Push your code to GitHub
+2. Go to [render.com](https://render.com) and create a new Web Service
+3. The `render.yaml` in this repo defines the full configuration
+4. Set the environment variables marked `sync: false` in the Render dashboard
+
+---
+
+## Common Errors & Fixes
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ENCRYPTION_KEY must be a 64-character hex string` | Missing or wrong `ENCRYPTION_KEY` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `PrismaClientInitializationError: Can't reach database server` | Wrong `DATABASE_URL` or DB not running | Check your connection string and make sure Postgres is running |
+| `Error: Cannot find module '@prisma/client'` | Prisma client not generated | Run `npx prisma generate` |
+| `Migration failed` | Schema out of sync with DB | Run `npx prisma migrate dev` |
+| `Unauthorized` on all API routes | JWT_SECRET mismatch or expired token | Clear cookies and log in again; check `JWT_SECRET` hasn't changed |
+| `Rate limiter unavailable, allowing request` | Redis not configured | This is a warning, not an error. Set `UPSTASH_REDIS_REST_URL` to enable Redis rate limiting |
+| `Cannot read properties of null (reading 'companyId')` | User not logged in when calling API | Ensure `getCurrentUser()` returns a user before using it |
+
+---
+
+## How to Add a New Feature
+
+1. **Schema change:** Edit `prisma/schema.prisma`, run `npx prisma migrate dev --name add_your_feature`
+2. **API route:** Create `app/api/your-feature/route.ts`:
+   - Call `getCurrentUser()` and return 401 if null
+   - Validate input with `z.object({...}).safeParse(body)`
+   - Filter all queries with `companyId: user.companyId`
+   - Create audit log entry with `createAuditLog()`
+3. **UI component:** Create `components/your-feature.tsx` with `"use client"` directive
+4. **Page:** Create `app/dashboard/your-feature/page.tsx`
+5. **Types:** Update `types/index.ts` with new interfaces
+6. **Tests:** Add unit tests in `__tests__/` and integration tests in `tests/` as needed
+
+---
+
+
 
 ### Core Features
 - ✅ **Multi-Tenant SaaS Architecture** - Complete company isolation with JWT authentication
