@@ -46,12 +46,12 @@ describe('Role-Based Access Control', () => {
     const sharedDoc = await createTestDocument(ctx, {
       companyId: company.id,
       createdById: engineer.id,
-      sharedWith: [client.id]
+      tags: [`shared:${client.id}`]
     });
     const privateDoc = await createTestDocument(ctx, {
       companyId: company.id,
       createdById: engineer.id,
-      sharedWith: []
+      tags: []
     });
 
     // Client should be able to find shared doc
@@ -59,20 +59,20 @@ describe('Role-Based Access Control', () => {
       where: {
         id: sharedDoc.id,
         companyId: client.companyId,
-        sharedWith: {
-          has: client.id,
+        tags: {
+          has: `shared:${client.id}`,
         },
       },
     });
     expect(foundShared).not.toBeNull();
 
-    // Client should not find private doc when filtering by sharedWith
+    // Client should not find private doc when filtering by tags
     const foundPrivate = await ctx.prisma.document.findFirst({
       where: {
         id: privateDoc.id,
         companyId: client.companyId,
-        sharedWith: {
-          has: client.id,
+        tags: {
+          has: `shared:${client.id}`,
         },
       },
     });
@@ -130,16 +130,14 @@ describe('Role-Based Access Control', () => {
       data: {
         email: `newuser-${Date.now()}@example.com`,
         passwordHash: '$2b$10$mockhash',
-        firstName: 'New',
-        lastName: 'User',
+        name: 'New User',
         companyId: company.id,
-        role: 'ENGINEER',
-        emailVerified: new Date(),
+        role: 'engineer',
       },
     });
 
     expect(newUser.companyId).toBe(company.id);
-    expect(newUser.role).toBe('ENGINEER');
+    expect(newUser.role).toBe('engineer');
   });
 
   it('should allow IT_ADMIN god-mode access to all resources', async () => {

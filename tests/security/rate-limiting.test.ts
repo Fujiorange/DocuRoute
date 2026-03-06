@@ -65,7 +65,7 @@ describe('Rate Limiting', () => {
 
   it('should apply different limits to authenticated users', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     const authenticatedKey = `user:${user.id}`;
     const authenticatedLimit = 100;

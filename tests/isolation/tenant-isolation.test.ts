@@ -13,8 +13,8 @@ describe('Multi-Tenant Isolation', () => {
     const companyA = await createTestCompany(ctx, { name: 'Construction A' });
     const companyB = await createTestCompany(ctx, { name: 'Engineering B' });
 
-    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'ENGINEER' });
-    const userB = await createTestUser(ctx, { companyId: companyB.id, role: 'ENGINEER' });
+    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'engineer' });
+    const userB = await createTestUser(ctx, { companyId: companyB.id, role: 'engineer' });
 
     const docA = await createTestDocument(ctx, {
       companyId: companyA.id,
@@ -47,17 +47,21 @@ describe('Multi-Tenant Isolation', () => {
   it('should enforce companyId in document creation', async () => {
     const companyA = await createTestCompany(ctx, { name: 'Company A' });
     const companyB = await createTestCompany(ctx, { name: 'Company B' });
-    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'ENGINEER' });
+    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'engineer' });
 
     // Simulate a user trying to create a document with a forged companyId
     // In real API, the companyId should be forced from the authenticated user
     const doc = await ctx.prisma.document.create({
       data: {
         title: 'Test Document',
-        content: 'Content',
+        s3Key: `test/${Date.now()}/document.pdf`,
+        s3Bucket: 'test-bucket',
+        fileName: 'document.pdf',
+        fileSize: BigInt(1024),
+        mimeType: 'application/pdf',
         companyId: userA.companyId, // Should use authenticated user's companyId, not request body
-        createdById: userA.id,
-        status: 'DRAFT',
+        uploadedById: userA.id,
+        status: 'draft',
       },
     });
 
@@ -68,7 +72,7 @@ describe('Multi-Tenant Isolation', () => {
   it('should filter documents by company in list queries', async () => {
     const companyA = await createTestCompany(ctx, { name: 'Company A' });
     const companyB = await createTestCompany(ctx, { name: 'Company B' });
-    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'ENGINEER' });
+    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'engineer' });
 
     await createTestDocument(ctx, {
       companyId: companyA.id,
@@ -100,9 +104,9 @@ describe('Multi-Tenant Isolation', () => {
     const companyA = await createTestCompany(ctx, { name: 'Company A' });
     const companyB = await createTestCompany(ctx, { name: 'Company B' });
 
-    await createTestUser(ctx, { companyId: companyA.id, role: 'ENGINEER' });
-    await createTestUser(ctx, { companyId: companyA.id, role: 'CLIENT' });
-    await createTestUser(ctx, { companyId: companyB.id, role: 'ENGINEER' });
+    await createTestUser(ctx, { companyId: companyA.id, role: 'engineer' });
+    await createTestUser(ctx, { companyId: companyA.id, role: 'client' });
+    await createTestUser(ctx, { companyId: companyB.id, role: 'engineer' });
 
     const usersA = await ctx.prisma.user.findMany({
       where: {
@@ -118,8 +122,8 @@ describe('Multi-Tenant Isolation', () => {
   it('should prevent cross-company folder access', async () => {
     const companyA = await createTestCompany(ctx, { name: 'Company A' });
     const companyB = await createTestCompany(ctx, { name: 'Company B' });
-    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'ENGINEER' });
-    const userB = await createTestUser(ctx, { companyId: companyB.id, role: 'ENGINEER' });
+    const userA = await createTestUser(ctx, { companyId: companyA.id, role: 'engineer' });
+    const userB = await createTestUser(ctx, { companyId: companyB.id, role: 'engineer' });
 
     const folderA = await createTestFolder(ctx, {
       companyId: companyA.id,
