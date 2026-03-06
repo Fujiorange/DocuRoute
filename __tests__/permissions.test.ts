@@ -48,9 +48,9 @@ describe("RBAC Permissions", () => {
   });
 
   it("canAccessFolder allows non-client roles without folder list", () => {
-    expect(canAccessFolder(Role.IT_ADMIN, "folder123")).toBe(true);
-    expect(canAccessFolder(Role.PROJECT_ADMIN, "folder456")).toBe(true);
-    expect(canAccessFolder(Role.ENGINEER, "folder789")).toBe(true);
+    expect(canAccessFolder(Role.IT_ADMIN, "folder123", [])).toBe(true);
+    expect(canAccessFolder(Role.PROJECT_ADMIN, "folder456", [])).toBe(true);
+    expect(canAccessFolder(Role.ENGINEER, "folder789", [])).toBe(true);
   });
 
   it("canAccessFolder denies client if folderId not in allowed list", () => {
