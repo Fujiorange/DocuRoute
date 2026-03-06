@@ -3,7 +3,8 @@ import { beforeAll, afterAll, afterEach } from 'vitest';
 // Global test setup
 beforeAll(() => {
   // Set test environment variables
-  process.env.NODE_ENV = 'test';
+  // Note: NODE_ENV is read-only and automatically set by vitest
+  // process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'test-secret-key-for-testing-only-32bytes';
   process.env.ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
   process.env.AWS_ACCESS_KEY_ID = 'test-access-key';

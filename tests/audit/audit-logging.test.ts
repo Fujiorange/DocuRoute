@@ -11,7 +11,7 @@ describe('Audit Logging', () => {
 
   it('should create audit log entries for document access', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     // Simulate a document access
     const auditLog = await ctx.prisma.auditLog.create({
@@ -19,7 +19,7 @@ describe('Audit Logging', () => {
         userId: user.id,
         companyId: company.id,
         action: 'DOCUMENT_ACCESS',
-        entityType: 'Document',
+        entity: 'Document',
         entityId: 'doc-123',
         details: JSON.stringify({ documentId: 'doc-123', action: 'view' }),
         ipAddress: '192.168.1.100',
@@ -30,7 +30,7 @@ describe('Audit Logging', () => {
     expect(auditLog.action).toBe('DOCUMENT_ACCESS');
     expect(auditLog.userId).toBe(user.id);
 
-    const details = JSON.parse(auditLog.details);
+    const details = JSON.parse(auditLog.details as string);
     expect(details.documentId).toBe('doc-123');
   });
 
@@ -42,7 +42,7 @@ describe('Audit Logging', () => {
         userId: null,
         companyId: company.id,
         action: 'LOGIN_FAILED',
-        entityType: 'User',
+        entity: 'User',
         entityId: 'unknown',
         details: JSON.stringify({ email: 'wrong@example.com', reason: 'invalid_password' }),
         ipAddress: '10.0.0.1',
@@ -53,20 +53,20 @@ describe('Audit Logging', () => {
     expect(auditLog.action).toBe('LOGIN_FAILED');
     expect(auditLog.userId).toBeNull();
 
-    const details = JSON.parse(auditLog.details);
+    const details = JSON.parse(auditLog.details as string);
     expect(details.email).toBe('wrong@example.com');
   });
 
   it('should prevent audit log tampering - UPDATE should not be possible', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'IT_ADMIN' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'it_admin' });
 
     const auditLog = await ctx.prisma.auditLog.create({
       data: {
         userId: user.id,
         companyId: company.id,
         action: 'DOCUMENT_DELETE',
-        entityType: 'Document',
+        entity: 'Document',
         entityId: 'doc-456',
         details: JSON.stringify({ documentId: 'doc-456', permanently: true }),
         ipAddress: '192.168.1.100',
@@ -98,14 +98,14 @@ describe('Audit Logging', () => {
 
   it('should prevent audit log deletion', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'IT_ADMIN' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'it_admin' });
 
     const auditLog = await ctx.prisma.auditLog.create({
       data: {
         userId: user.id,
         companyId: company.id,
         action: 'USER_DELETE',
-        entityType: 'User',
+        entity: 'User',
         entityId: 'user-789',
         details: JSON.stringify({ userId: 'user-789', reason: 'policy_violation' }),
         ipAddress: '192.168.1.100',
@@ -126,14 +126,14 @@ describe('Audit Logging', () => {
 
   it('should track IP addresses in audit logs', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     const auditLog = await ctx.prisma.auditLog.create({
       data: {
         userId: user.id,
         companyId: company.id,
         action: 'DOCUMENT_LIST',
-        entityType: 'Document',
+        entity: 'Document',
         entityId: null,
         details: JSON.stringify({ query: 'list_all' }),
         ipAddress: '192.168.1.100',
@@ -146,7 +146,7 @@ describe('Audit Logging', () => {
 
   it('should handle X-Forwarded-For header for IP tracking', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     // Simulate multiple IPs in X-Forwarded-For (client, proxy1, proxy2)
     const forwardedFor = '203.0.113.45, 10.0.0.1, 172.16.0.1';
@@ -157,7 +157,7 @@ describe('Audit Logging', () => {
         userId: user.id,
         companyId: company.id,
         action: 'DOCUMENT_DOWNLOAD',
-        entityType: 'Document',
+        entity: 'Document',
         entityId: 'doc-999',
         details: JSON.stringify({ documentId: 'doc-999', format: 'pdf' }),
         ipAddress: clientIp,
@@ -169,7 +169,7 @@ describe('Audit Logging', () => {
 
   it('should maintain audit log chronological order', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     // Create multiple audit log entries
     const log1 = await ctx.prisma.auditLog.create({
@@ -177,7 +177,7 @@ describe('Audit Logging', () => {
         userId: user.id,
         companyId: company.id,
         action: 'LOGIN_SUCCESS',
-        entityType: 'User',
+        entity: 'User',
         entityId: user.id,
         details: JSON.stringify({ method: '2fa' }),
         ipAddress: '192.168.1.100',
@@ -191,7 +191,7 @@ describe('Audit Logging', () => {
         userId: user.id,
         companyId: company.id,
         action: 'DOCUMENT_ACCESS',
-        entityType: 'Document',
+        entity: 'Document',
         entityId: 'doc-123',
         details: JSON.stringify({ documentId: 'doc-123' }),
         ipAddress: '192.168.1.100',

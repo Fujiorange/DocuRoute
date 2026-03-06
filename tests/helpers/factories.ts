@@ -16,11 +16,11 @@ export async function createTestUser(
   ctx: TestContext,
   options: {
     companyId: string;
-    role?: 'IT_ADMIN' | 'PROJECT_ADMIN' | 'ENGINEER' | 'CLIENT';
+    role?: 'it_admin' | 'project_admin' | 'engineer' | 'client';
     [key: string]: unknown;
   }
 ) {
-  const { companyId, role = 'ENGINEER', ...overrides } = options;
+  const { companyId, role = 'engineer', ...overrides } = options;
   const email = `test-${Date.now()}-${Math.random()}@example.com`;
 
   const user = await ctx.prisma.user.create({
@@ -65,7 +65,7 @@ export async function createTestDocument(
 
   let userId = createdById;
   if (!userId) {
-    const user = await createTestUser(ctx, { companyId, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId, role: 'engineer' });
     userId = user.id;
   }
 
@@ -99,7 +99,7 @@ export async function createTestFolder(
 
   let userId = createdById;
   if (!userId) {
-    const user = await createTestUser(ctx, { companyId, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId, role: 'engineer' });
     userId = user.id;
   }
 
@@ -127,7 +127,7 @@ export async function createTestProject(
 
   let userId = createdById;
   if (!userId) {
-    const user = await createTestUser(ctx, { companyId, role: 'PROJECT_ADMIN' });
+    const user = await createTestUser(ctx, { companyId, role: 'project_admin' });
     userId = user.id;
   }
 
@@ -137,7 +137,6 @@ export async function createTestProject(
       description: 'Test project description',
       companyId,
       createdById: userId,
-      status: 'ACTIVE',
       ...overrides,
     },
   });

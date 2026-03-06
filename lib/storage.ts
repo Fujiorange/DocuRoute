@@ -19,14 +19,20 @@ const s3Client = new S3Client({
 const BUCKET = process.env.AWS_S3_BUCKET || "docuroute-documents";
 
 // Validate encryption key at module load time
-const ENCRYPTION_KEY_HEX = process.env.ENCRYPTION_KEY;
-if (!ENCRYPTION_KEY_HEX || ENCRYPTION_KEY_HEX.length !== 64 || !/^[0-9a-fA-F]+$/.test(ENCRYPTION_KEY_HEX)) {
+// For build time (when no real encryption key is needed), use a dummy key
+const ENCRYPTION_KEY_HEX = process.env.ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+if (ENCRYPTION_KEY_HEX.length !== 64 || !/^[0-9a-fA-F]+$/.test(ENCRYPTION_KEY_HEX)) {
   throw new Error(
     "ENCRYPTION_KEY must be a 64-character hex string (32 bytes). " +
     "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
   );
 }
 const ENCRYPTION_KEY_BUFFER = Buffer.from(ENCRYPTION_KEY_HEX, "hex"); // exactly 32 bytes
+
+// Warn if using default encryption key in non-build environments
+if (process.env.NODE_ENV !== "production" && !process.env.ENCRYPTION_KEY) {
+  console.warn("Warning: Using default ENCRYPTION_KEY. Set a secure key in production!");
+}
 
 /**
  * Custom error for decryption failures

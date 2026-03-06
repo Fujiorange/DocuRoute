@@ -1,10 +1,10 @@
 // Role fixtures and helpers
 export const ROLES = {
-  IT_ADMIN: 'IT_ADMIN',
-  SUPER_ADMIN: 'IT_ADMIN', // Alias for IT_ADMIN (god mode)
-  PROJECT_ADMIN: 'PROJECT_ADMIN',
-  ENGINEER: 'ENGINEER',
-  CLIENT: 'CLIENT',
+  IT_ADMIN: 'it_admin',
+  SUPER_ADMIN: 'it_admin', // Alias for IT_ADMIN (god mode)
+  PROJECT_ADMIN: 'project_admin',
+  ENGINEER: 'engineer',
+  CLIENT: 'client',
 } as const;
 
 export type Role = typeof ROLES[keyof typeof ROLES];
@@ -12,30 +12,30 @@ export type Role = typeof ROLES[keyof typeof ROLES];
 // Permission matrix
 export const PERMISSIONS = {
   documents: {
-    create: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER'],
-    read: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER', 'CLIENT'],
-    update: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER'],
-    delete: ['IT_ADMIN', 'PROJECT_ADMIN'],
+    create: ['it_admin', 'project_admin', 'engineer'] as Role[],
+    read: ['it_admin', 'project_admin', 'engineer', 'client'] as Role[],
+    update: ['it_admin', 'project_admin', 'engineer'] as Role[],
+    delete: ['it_admin', 'project_admin'] as Role[],
   },
   users: {
-    create: ['IT_ADMIN', 'PROJECT_ADMIN'],
-    read: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER'],
-    update: ['IT_ADMIN', 'PROJECT_ADMIN'],
-    delete: ['IT_ADMIN'],
+    create: ['it_admin', 'project_admin'] as Role[],
+    read: ['it_admin', 'project_admin', 'engineer'] as Role[],
+    update: ['it_admin', 'project_admin'] as Role[],
+    delete: ['it_admin'] as Role[],
   },
   projects: {
-    create: ['IT_ADMIN', 'PROJECT_ADMIN'],
-    read: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER', 'CLIENT'],
-    update: ['IT_ADMIN', 'PROJECT_ADMIN'],
-    delete: ['IT_ADMIN'],
+    create: ['it_admin', 'project_admin'] as Role[],
+    read: ['it_admin', 'project_admin', 'engineer', 'client'] as Role[],
+    update: ['it_admin', 'project_admin'] as Role[],
+    delete: ['it_admin'] as Role[],
   },
   folders: {
-    create: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER'],
-    read: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER', 'CLIENT'],
-    update: ['IT_ADMIN', 'PROJECT_ADMIN', 'ENGINEER'],
-    delete: ['IT_ADMIN', 'PROJECT_ADMIN'],
+    create: ['it_admin', 'project_admin', 'engineer'] as Role[],
+    read: ['it_admin', 'project_admin', 'engineer', 'client'] as Role[],
+    update: ['it_admin', 'project_admin', 'engineer'] as Role[],
+    delete: ['it_admin', 'project_admin'] as Role[],
   },
-} as const;
+};
 
 export function hasPermission(role: Role, resource: string, action: string): boolean {
   const resourcePerms = PERMISSIONS[resource as keyof typeof PERMISSIONS];
