@@ -133,13 +133,13 @@ describe('Role-Based Access Control', () => {
         firstName: 'New',
         lastName: 'User',
         companyId: company.id,
-        role: 'ENGINEER',
+        role: 'engineer',
         emailVerified: new Date(),
       },
     });
 
     expect(newUser.companyId).toBe(company.id);
-    expect(newUser.role).toBe('ENGINEER');
+    expect(newUser.role).toBe('engineer');
   });
 
   it('should allow IT_ADMIN god-mode access to all resources', async () => {

@@ -11,7 +11,7 @@ describe('Audit Logging', () => {
 
   it('should create audit log entries for document access', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     // Simulate a document access
     const auditLog = await ctx.prisma.auditLog.create({
@@ -59,7 +59,7 @@ describe('Audit Logging', () => {
 
   it('should prevent audit log tampering - UPDATE should not be possible', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'IT_ADMIN' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'it_admin' });
 
     const auditLog = await ctx.prisma.auditLog.create({
       data: {
@@ -98,7 +98,7 @@ describe('Audit Logging', () => {
 
   it('should prevent audit log deletion', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'IT_ADMIN' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'it_admin' });
 
     const auditLog = await ctx.prisma.auditLog.create({
       data: {
@@ -126,7 +126,7 @@ describe('Audit Logging', () => {
 
   it('should track IP addresses in audit logs', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     const auditLog = await ctx.prisma.auditLog.create({
       data: {
@@ -146,7 +146,7 @@ describe('Audit Logging', () => {
 
   it('should handle X-Forwarded-For header for IP tracking', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     // Simulate multiple IPs in X-Forwarded-For (client, proxy1, proxy2)
     const forwardedFor = '203.0.113.45, 10.0.0.1, 172.16.0.1';
@@ -169,7 +169,7 @@ describe('Audit Logging', () => {
 
   it('should maintain audit log chronological order', async () => {
     const company = await createTestCompany(ctx);
-    const user = await createTestUser(ctx, { companyId: company.id, role: 'ENGINEER' });
+    const user = await createTestUser(ctx, { companyId: company.id, role: 'engineer' });
 
     // Create multiple audit log entries
     const log1 = await ctx.prisma.auditLog.create({
