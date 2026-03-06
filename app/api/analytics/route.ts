@@ -71,13 +71,13 @@ export const GET = catchAsync(async (req: NextRequest) => {
   });
 
   const uploaderDetails = await prisma.user.findMany({
-    where: { id: { in: topUploaders.map((u) => u.uploadedById) } },
+    where: { id: { in: topUploaders.map((u: { uploadedById: string }) => u.uploadedById) } },
     select: { id: true, name: true, email: true },
   });
 
-  const topUploadersWithNames = topUploaders.map((u) => ({
+  const topUploadersWithNames = topUploaders.map((u: { uploadedById: string; _count: { uploadedById: number } }) => ({
     ...u,
-    user: uploaderDetails.find((d) => d.id === u.uploadedById),
+    user: uploaderDetails.find((d: { id: string; name: string; email: string }) => d.id === u.uploadedById),
   }));
 
   return NextResponse.json({
