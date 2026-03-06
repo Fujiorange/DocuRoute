@@ -38,58 +38,20 @@ export async function createAuditLog(options: AuditLogOptions): Promise<void> {
 
 /**
  * Prisma middleware for automatic audit logging
+ *
+ * NOTE: This function is deprecated and no longer functional in Prisma v7.
+ * The $use middleware API was removed in Prisma v7.
+ *
+ * For audit logging, use the createAuditLog() function directly in your API routes
+ * after database operations that need to be tracked.
+ *
+ * @deprecated Use createAuditLog() directly instead
  */
 export function registerAuditLogMiddleware() {
-  prisma.$use(async (params, next) => {
-    const result = await next(params);
-
-    // Skip audit logging for certain models
-    const skipModels = ["AuditLog", "TwoFactorSecret", "PasswordReset"];
-    if (skipModels.includes(params.model || "")) {
-      return result;
-    }
-
-    // Only log mutations (create, update, delete)
-    const mutations = ["create", "update", "updateMany", "delete", "deleteMany"];
-    if (!mutations.includes(params.action)) {
-      return result;
-    }
-
-    // Extract data for audit log
-    const entity = params.model || "Unknown";
-    let action = `${entity.toLowerCase()}.${params.action}`;
-    let entityId: string | undefined;
-    let details: Record<string, any> = {};
-
-    if (params.action === "create" && result?.id) {
-      entityId = result.id;
-      details = { data: params.args?.data };
-    } else if (params.action === "update" && params.args?.where?.id) {
-      entityId = params.args.where.id;
-      details = { changes: params.args?.data };
-    } else if (params.action === "delete" && params.args?.where?.id) {
-      entityId = params.args.where.id;
-    }
-
-    // Try to extract companyId from the operation
-    let companyId: string | undefined;
-    if (params.args?.data?.companyId) {
-      companyId = params.args.data.companyId;
-    } else if (result?.companyId) {
-      companyId = result.companyId;
-    }
-
-    // If we have a companyId, create the audit log
-    if (companyId) {
-      await createAuditLog({
-        action,
-        entity,
-        entityId,
-        details,
-        companyId,
-      });
-    }
-
-    return result;
-  });
+  // No-op: Prisma v7 removed the $use middleware API
+  // Audit logging must be done manually by calling createAuditLog() after operations
+  console.warn(
+    "Warning: registerAuditLogMiddleware() is deprecated. Prisma v7 removed the $use middleware API. " +
+    "Please use createAuditLog() directly in your API routes."
+  );
 }

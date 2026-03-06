@@ -1,6 +1,15 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy initialization to avoid requiring API key at build time
+let resendInstance: Resend | null = null;
+
+function getResendClient(): Resend {
+  if (!resendInstance) {
+    const apiKey = process.env.RESEND_API_KEY || "dummy-key-for-build";
+    resendInstance = new Resend(apiKey);
+  }
+  return resendInstance;
+}
 
 const FROM_EMAIL = process.env.EMAIL_FROM || "noreply@docuroute.com";
 const FROM_NAME = process.env.EMAIL_FROM_NAME || "DocuRoute";
@@ -22,6 +31,7 @@ export async function sendEmail(options: EmailOptions): Promise<void> {
     return;
   }
 
+  const resend = getResendClient();
   await resend.emails.send({
     from: `${FROM_NAME} <${FROM_EMAIL}>`,
     to: options.to,
