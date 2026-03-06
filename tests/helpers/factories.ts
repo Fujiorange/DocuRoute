@@ -7,7 +7,6 @@ export async function createTestCompany(ctx: TestContext, overrides: Record<stri
   return ctx.prisma.company.create({
     data: {
       name: `Test Company ${Date.now()}`,
-      subscriptionTier: 'FREE',
       ...overrides,
     },
   });
@@ -28,11 +27,9 @@ export async function createTestUser(
     data: {
       email,
       passwordHash: await bcrypt.hash('TestPassword123!', 10),
-      firstName: 'Test',
-      lastName: 'User',
+      name: 'Test User',
       companyId,
       role,
-      emailVerified: new Date(),
       isActive: true,
       ...overrides,
     },
@@ -75,10 +72,14 @@ export async function createTestDocument(
   return ctx.prisma.document.create({
     data: {
       title: `Test Document ${Date.now()}`,
-      content: 'Test content',
+      s3Key: `test/${Date.now()}/document.pdf`,
+      s3Bucket: 'test-bucket',
+      fileName: 'document.pdf',
+      fileSize: BigInt(1024),
+      mimeType: 'application/pdf',
       companyId,
-      createdById: userId,
-      status: 'DRAFT',
+      uploadedById: userId,
+      status: 'draft',
       ...overrides,
     },
   });

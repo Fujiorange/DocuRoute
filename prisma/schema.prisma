@@ -82,12 +82,14 @@ model Document {
   description String?
 
   // S3 storage
-  s3Key        String
-  s3Bucket     String
-  fileName     String
-  fileSize     BigInt
-  mimeType     String
-  isEncrypted  Boolean @default(true)
+  s3Key              String
+  s3Bucket           String
+  fileName           String
+  fileSize           BigInt
+  mimeType           String
+  isEncrypted        Boolean @default(true)
+  encryptionIV       String? // Encryption initialization vector (hex string)
+  encryptionAuthTag  String? // GCM authentication tag (hex string)
 
   // Metadata
   tags         String[] // Array of tags for categorization
