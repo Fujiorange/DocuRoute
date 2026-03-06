@@ -1,8 +1,42 @@
 # Security Policy
 
-## Overview
+## Supported Versions
+| Version | Supported |
+|---------|-----------|
+| Phase 1 (current) | ✅ Active development |
 
-DocuRoute takes security seriously. This document outlines our security practices, encryption strategy, data protection measures, and procedures for reporting security vulnerabilities.
+## Reporting a Vulnerability
+Please do NOT report security vulnerabilities via public GitHub issues.
+
+Email: security@docuroute.com (or use the repo owner's email until a dedicated address is set up)
+
+Include:
+- Description of the vulnerability
+- Steps to reproduce
+- Potential impact
+- Suggested fix (optional)
+
+We aim to respond within 48 hours and resolve critical issues within 7 days.
+
+## Security Architecture (Phase 1)
+- **AES-256-GCM encryption at rest** for all documents
+- **JWT** (signed, httpOnly cookies) with 7-day expiry
+- **RBAC** with 4 roles (`it_admin`, `project_admin`, `engineer`, `client`) and 22 granular permissions
+- **Full audit logging** via Prisma middleware for all mutations
+- **PDPA-compliant** data export and deletion APIs
+- **Rate limiting** (Redis-backed in production via Upstash, in-memory fallback in dev)
+- **Security headers** (CSP, HSTS, X-Frame-Options, X-Content-Type-Options)
+- **Input validation** via Zod schemas on all API routes
+- **Multi-tenant isolation** enforced at the database and application layers
+
+## Known Limitations (Phase 1)
+- **Server-side encryption only** — encryption key held by vendor (no zero-knowledge option yet)
+- **No end-to-end encryption** between clients
+- **2FA is optional**, not enforced for all roles
+- **No penetration test** has been conducted yet
+- **No live deployment** — currently in local/preview environment only
+
+These are acknowledged roadmap items for Phase 2.
 
 ## Encryption Strategy
 

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyTokenEdge } from "@/lib/auth-edge";
 
 const PUBLIC_PATHS = ["/", "/login", "/register"];
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Allow public paths and static files
@@ -18,7 +19,7 @@ export function middleware(req: NextRequest) {
     return addSecurityHeaders(NextResponse.next());
   }
 
-  // Check for auth cookie
+  // Check for auth cookie and verify token
   const token = req.cookies.get("auth_token")?.value;
   if (!token) {
     if (pathname.startsWith("/api/")) {
@@ -27,6 +28,20 @@ export function middleware(req: NextRequest) {
       );
     }
     return addSecurityHeaders(NextResponse.redirect(new URL("/login", req.url)));
+  }
+
+  // Verify JWT signature and expiration
+  const payload = await verifyTokenEdge(token);
+  if (!payload) {
+    // Token exists but is invalid/expired/forged
+    if (pathname.startsWith("/api/")) {
+      return addSecurityHeaders(
+        NextResponse.json({ error: "Invalid or expired token" }, { status: 401 })
+      );
+    }
+    const response = NextResponse.redirect(new URL("/login", req.url));
+    response.cookies.delete("auth_token");
+    return addSecurityHeaders(response);
   }
 
   return addSecurityHeaders(NextResponse.next());

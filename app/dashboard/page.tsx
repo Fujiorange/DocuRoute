@@ -18,7 +18,7 @@ export default function DashboardPage() {
   useEffect(() => {
     Promise.all([
       fetch("/api/projects").then((r) => r.json()),
-      fetch("/api/documents").then((r) => r.json()),
+      fetch("/api/documents-v2").then((r) => r.json()),
     ]).then(([pd, dd]) => {
       setProjects(pd.projects || []);
       setDocuments(dd.documents || []);

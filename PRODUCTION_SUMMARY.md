@@ -1,13 +1,32 @@
-# DocuRoute Production Transformation Summary
+# DocuRoute — Phase 1 Foundation Status
 
-**Transformation Date:** March 2026
-**Status:** ✅ **PRODUCTION READY**
+**Status Date:** March 2026
+**Status:** 🔵 **PHASE 1 FOUNDATION — Pre-Launch**
 
 ---
 
 ## Executive Summary
 
-DocuRoute has been successfully transformed from a Phase 1 MVP into a **production-grade, enterprise-ready SaaS platform** suitable for Singapore construction and engineering companies. All non-negotiable requirements have been implemented, and the system is now ready for client pilots and production deployment.
+DocuRoute has been hardened from a scaffolded prototype into a **credible Phase 1 foundation** suitable for investor/customer preview and technical due diligence. This is **not yet production-ready** for paying customers, but demonstrates a solid, trustworthy codebase with good security fundamentals.
+
+---
+
+## ⚠️ Known Phase 1 Limitations
+
+These are acknowledged gaps. They are on the Phase 2 roadmap.
+
+| Area | Current State | Phase 2 Plan |
+|------|--------------|--------------|
+| **Live deployment** | Not yet deployed — local/Vercel preview only | Production deployment with custom domain |
+| **Test coverage** | ~60% on core lib modules (50 passing tests) | 80%+ with E2E Playwright tests |
+| **Zero-knowledge encryption** | Server-side only (vendor holds key) | Client-side key derivation option |
+| **2FA enforcement** | Optional for all roles | Mandatory for IT_ADMIN and PROJECT_ADMIN |
+| **Real-time notifications** | Email only, no in-app push | WebSocket or SSE for live updates |
+| **Search** | PostgreSQL ILIKE (good to ~50k docs/company) | Full-text search with pg_trgm or Elasticsearch |
+| **Load testing** | Not conducted | 50 concurrent 100MB uploads validated |
+| **Penetration test** | Not conducted | 3rd-party pentest before first paying customer |
+| **SLA/Support** | No SLA yet | SLA documentation before commercial contracts |
+| **Privacy Policy / ToS** | Not published | Published at docuroute.com before launch |
 
 ---
 
@@ -53,14 +72,18 @@ DocuRoute has been successfully transformed from a Phase 1 MVP into a **producti
 | **Analytics Dashboard** | ✅ Complete | Storage usage, activity tracking, top contributors |
 | **Data Retention** | ✅ Complete | 7-year retention for Singapore construction industry compliance |
 
-### ✅ Testing & Documentation (100% Complete)
+### ✅ Testing & Documentation (Phase 1 Foundation)
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| **Unit Tests** | ✅ Complete | Vitest setup with 6 passing tests for RBAC and 2FA |
-| **README** | ✅ Complete | Comprehensive 500+ line production deployment guide |
+| **Unit Tests** | ✅ Complete | 50 passing tests covering core security modules (encryption, JWT, tenant isolation, RBAC, validation) |
+| **Integration Tests** | ⚠️ Partial | Database-dependent tests exist but require live PostgreSQL |
+| **E2E Tests** | ❌ Not Started | Planned for Phase 2 with Playwright |
+| **README** | ✅ Complete | Comprehensive 500+ line deployment guide |
 | **API Documentation** | ✅ Complete | Full endpoint documentation in README |
-| **Environment Config** | ✅ Complete | Complete .env.example with 25+ variables |
+| **Environment Config** | ✅ Complete | Complete .env.example with all required variables |
+| **Security Documentation** | ✅ Complete | SECURITY.md with honest Phase 1 status |
+| **Roadmap** | ✅ Complete | ROADMAP.md with Phase 1-4 planning |
 
 ---
 
@@ -435,38 +458,45 @@ DocuRoute has been successfully transformed from a Phase 1 MVP into a **producti
 
 ## Final Assessment
 
-**Status:** ✅ **READY FOR PRODUCTION**
+**Status:** 🔵 **PHASE 1 FOUNDATION — READY FOR INVESTOR/CUSTOMER PREVIEW**
 
-DocuRoute has been successfully transformed into an **enterprise-grade, production-ready SaaS platform** that meets all requirements for a Singapore construction/engineering company pilot.
+DocuRoute has been successfully hardened from a scaffolded prototype into a **credible Phase 1 foundation** with solid security fundamentals and honest, transparent documentation. This is **NOT YET READY FOR PAYING PILOTS** but demonstrates technical competence and architectural soundness.
 
-### Key Achievements
-- ✅ Eliminated all ephemeral storage
-- ✅ Implemented real email system
-- ✅ Added end-to-end security
-- ✅ Built full document management features
-- ✅ Ensured PDPA/GDPR compliance
-- ✅ Created comprehensive documentation
-- ✅ Validated with unit tests
+### Key Achievements (Phase 1)
+- ✅ Fixed critical security gaps (JWT verification, encryption key validation, tenant isolation)
+- ✅ Added comprehensive input validation (Zod schemas)
+- ✅ Implemented proper rate limiting (Upstash Redis)
+- ✅ Created robust test suite (50 passing tests)
+- ✅ Honest documentation (SECURITY.md, ROADMAP.md)
+- ✅ GitHub Actions CI pipeline
+- ✅ Removed legacy code and cleaned up codebase
 
-### Client-Ready Features
+### What's Proven
 - Multi-tenant SaaS architecture
 - Cloud storage with encryption
 - Role-based access control
-- Two-factor authentication
-- Approval workflows
-- Full audit trail
-- Analytics dashboard
+- JWT authentication with Edge Runtime support
+- Audit logging
 - PDPA compliance tools
 
-**The application is now ready for a paying construction client pilot.**
+### What's Missing (Phase 2 Requirements)
+- ❌ Live deployment (currently local/preview only)
+- ❌ Load testing and performance validation
+- ❌ E2E test suite
+- ❌ Penetration testing
+- ❌ 2FA enforcement for admin roles
+- ❌ Real-time notifications
+- ❌ Production support and SLA
+
+**This codebase is ready for technical review and investor demo, but NOT yet for paying customers.**
 
 ---
 
-**Transformation completed on:** March 5, 2026
-**Total changes:** 30+ files, 3000+ lines of production code
-**Testing:** 6 unit tests passing
-**Documentation:** Complete with deployment guide
-**Status:** ✅ Production-Ready
+**Hardening completed on:** March 6, 2026
+**Total changes:** 40+ files, 2000+ lines of security improvements
+**Testing:** 50 unit tests passing (encryption, JWT, RBAC, validation, tenant isolation)
+**Documentation:** Complete and honest about Phase 1 status
+**Status:** 🔵 Phase 1 Foundation — Pre-Launch
 
 ---
 

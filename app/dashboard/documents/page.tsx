@@ -67,7 +67,7 @@ export default function DocumentsPage() {
 
   const fetchData = async () => {
     const [docsRes, projRes] = await Promise.all([
-      fetch("/api/documents").then((r) => r.json()),
+      fetch("/api/documents-v2").then((r) => r.json()),
       fetch("/api/projects").then((r) => r.json()),
     ]);
     setDocuments(docsRes.documents || []);
@@ -91,7 +91,7 @@ export default function DocumentsPage() {
       if (form.description) formData.append("description", form.description);
       if (form.projectId && form.projectId !== "none") formData.append("projectId", form.projectId);
 
-      const res = await fetch("/api/documents", { method: "POST", body: formData });
+      const res = await fetch("/api/documents-v2", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) {
         toast({ title: "Upload failed", description: data.error, variant: "destructive" });

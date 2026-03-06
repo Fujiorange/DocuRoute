@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
           userId: user.id,
           companyId: user.companyId,
           action: "LOGOUT",
-          entityType: "User",
+          entity: "User",
           entityId: user.id,
           details: JSON.stringify({
             email: user.email,
