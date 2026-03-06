@@ -17,7 +17,16 @@ const s3Client = new S3Client({
 });
 
 const BUCKET = process.env.AWS_S3_BUCKET || "docuroute-documents";
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-change-in-production";
+
+// Validate encryption key at module load time
+const ENCRYPTION_KEY_HEX = process.env.ENCRYPTION_KEY;
+if (!ENCRYPTION_KEY_HEX || ENCRYPTION_KEY_HEX.length !== 64 || !/^[0-9a-fA-F]+$/.test(ENCRYPTION_KEY_HEX)) {
+  throw new Error(
+    "ENCRYPTION_KEY must be a 64-character hex string (32 bytes). " +
+    "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+  );
+}
+const ENCRYPTION_KEY_BUFFER = Buffer.from(ENCRYPTION_KEY_HEX, "hex"); // exactly 32 bytes
 
 /**
  * Custom error for decryption failures
@@ -35,8 +44,7 @@ export class DecryptionError extends Error {
  */
 function encrypt(data: Buffer): { encrypted: Buffer; iv: string; authTag: string } {
   const iv = crypto.randomBytes(12); // 12 bytes for GCM (recommended)
-  const key = Buffer.from(ENCRYPTION_KEY, "hex").slice(0, 32);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", ENCRYPTION_KEY_BUFFER, iv);
 
   const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
   const authTag = cipher.getAuthTag();
@@ -55,9 +63,8 @@ function decrypt(data: Buffer, ivHex: string, authTagHex: string): Buffer {
   try {
     const iv = Buffer.from(ivHex, "hex");
     const authTag = Buffer.from(authTagHex, "hex");
-    const key = Buffer.from(ENCRYPTION_KEY, "hex").slice(0, 32);
 
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", ENCRYPTION_KEY_BUFFER, iv);
     decipher.setAuthTag(authTag);
 
     return Buffer.concat([decipher.update(data), decipher.final()]);
@@ -242,4 +249,16 @@ export async function getUploadUrl(
   const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn });
 
   return { uploadUrl, s3Key };
+}
+
+/**
+ * Validate encryption configuration at startup
+ * Call this in your app initialization to fail fast with a clear error message
+ */
+export function validateEncryptionConfig(): void {
+  // Validation already happens at module load time via ENCRYPTION_KEY_BUFFER
+  // This function exists for explicit startup validation calls
+  if (!ENCRYPTION_KEY_BUFFER || ENCRYPTION_KEY_BUFFER.length !== 32) {
+    throw new Error("Encryption key validation failed");
+  }
 }
