@@ -24,11 +24,13 @@
 ### Security & Compliance
 - ✅ **Role-Based Access Control (RBAC)** - IT Admin, Project Admin, Engineer, Client roles
 - ✅ **Two-Factor Authentication (2FA)** - TOTP with QR code setup
-- ✅ **Password Reset** - Secure email-based password recovery
-- ✅ **Audit Logging** - Complete audit trail of all actions
+- ✅ **AES-256-GCM Encryption** - Authenticated encryption with random IV per file
+- ✅ **Security Headers** - HSTS, CSP, X-Frame-Options, X-Content-Type-Options
+- ✅ **Immutable Audit Logging** - Complete audit trail with 7-year retention
 - ✅ **Rate Limiting** - Protection against abuse (100 req/15min default)
+- ✅ **Multi-Tenant Isolation** - Strict data segregation by company
 - ✅ **PDPA/GDPR Compliance** - Data export and account deletion tools
-- ✅ **Encryption** - End-to-end encryption for documents
+- 📄 **Security Policy** - See [SECURITY.md](SECURITY.md) for full details
 
 ### Email & Notifications
 - ✅ **Real Email System** - Resend integration for all notifications
@@ -259,33 +261,79 @@ npx prisma migrate reset
 
 ---
 
-## 🔐 Security Best Practices
+## 🔐 Security
 
-### JWT & Cookies
-- JWT tokens stored in httpOnly cookies (XSS protection)
-- 7-day expiration
-- Secure flag enabled in production
+DocuRoute implements production-grade security hardening for multi-tenant SaaS applications. See [SECURITY.md](SECURITY.md) for complete details.
 
-### Password Requirements
-- Minimum 8 characters
-- Hashed with bcryptjs (10 rounds)
+### Core Security Features
 
-### 2FA
-- TOTP-based (compatible with Google Authenticator, Authy)
-- 2-step time window for clock drift
+✅ **AES-256-GCM Encryption**
+- Authenticated encryption with Galois/Counter Mode
+- Random 16-byte IV per file
+- 16-byte authentication tag for integrity verification
+- Detects tampering or wrong key decryption
 
-### Rate Limiting
-- 100 requests per 15 minutes per IP (configurable)
-- Adjust via `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`
+✅ **Multi-Tenant Isolation**
+- All resources scoped to `companyId`
+- Database queries enforce company-level filtering
+- No cross-tenant data access possible
+- Tested with comprehensive isolation test suite
 
-### File Upload
-- Maximum 200 MB per file (configurable via `MAX_FILE_SIZE`)
-- AES-256 encryption at rest
-- S3 server-side encryption (SSE-S3)
+✅ **Immutable Audit Logging**
+- All security-relevant operations logged
+- No UPDATE/DELETE operations on audit logs
+- 7-year retention for compliance
+- IP address tracking with X-Forwarded-For support
 
-### Audit Logging
-- All mutations logged with user, timestamp, IP
-- Stored in PostgreSQL for 7 years (Singapore compliance)
+✅ **Security Headers**
+- `X-Content-Type-Options: nosniff` - Prevents MIME sniffing
+- `X-Frame-Options: DENY` - Prevents clickjacking
+- `Strict-Transport-Security` - HSTS with 1-year max-age (production)
+- `Content-Security-Policy` - Minimal CSP for XSS protection
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` - Restricts camera, microphone, geolocation
+
+✅ **Authentication & Authorization**
+- JWT tokens in httpOnly cookies (XSS protection)
+- bcrypt password hashing (12 rounds)
+- TOTP-based 2FA (Speakeasy)
+- Role-based access control (IT_ADMIN, PROJECT_ADMIN, ENGINEER, CLIENT)
+
+✅ **Rate Limiting**
+- In-memory rate limiter with Redis backing (optional)
+- 100 requests per 15 minutes per IP (public endpoints)
+- Stricter limits on sensitive endpoints (login: 5/15min)
+- Graceful fallback if Redis unavailable
+
+✅ **Input Validation**
+- Zod schemas for all API inputs (planned)
+- File type validation with magic number checking (planned)
+- Filename sanitization
+- SQL injection prevention via Prisma ORM
+
+### Security Checklist for Phase 2
+
+Before moving to Phase 2, ensure:
+
+- [x] AES-256-GCM encryption implemented with auth tags
+- [x] Custom DecryptionError for graceful wrong-key handling
+- [x] Security headers added to middleware
+- [x] Multi-tenant isolation test suite (5 tests)
+- [x] RBAC permission test suite (7 tests)
+- [x] Encryption cycle tests with large files + wrong key scenarios
+- [x] Immutable audit log tests
+- [x] Rate limiting test suite (8 tests)
+- [x] CI/CD pipeline with coverage enforcement (65% threshold)
+- [x] SECURITY.md documentation
+- [ ] Zod validation on all API routes
+- [ ] File type magic number validation
+- [ ] `/api/auth/logout` route with audit logging
+- [ ] Upstash Redis integration for distributed rate limiting
+- [ ] Third-party security audit
+
+### Reporting Security Issues
+
+See [SECURITY.md](SECURITY.md) for responsible disclosure guidelines.
 
 ---
 

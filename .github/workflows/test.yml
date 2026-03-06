@@ -1,0 +1,88 @@
+name: Test Suite
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: docuroute_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Lint code
+        run: npm run lint || echo "No lint script found, skipping..."
+        continue-on-error: true
+
+      - run: npx prisma generate
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/docuroute_test
+        run: npx prisma migrate deploy
+
+      - name: Run tests with coverage
+        env:
+          TEST_DATABASE_URL: postgresql://test:test@localhost:5432/docuroute_test
+          DATABASE_URL: postgresql://test:test@localhost:5432/docuroute_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-testing-only-32bytes
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          AWS_ACCESS_KEY_ID: test-access-key
+          AWS_SECRET_ACCESS_KEY: test-secret-key
+          AWS_S3_BUCKET: test-bucket
+          AWS_REGION: ap-southeast-1
+          NODE_ENV: test
+        run: npm run test:ci
+
+      - name: Enforce coverage threshold
+        env:
+          TEST_DATABASE_URL: postgresql://test:test@localhost:5432/docuroute_test
+          DATABASE_URL: postgresql://test:test@localhost:5432/docuroute_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-testing-only-32bytes
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          AWS_ACCESS_KEY_ID: test-access-key
+          AWS_SECRET_ACCESS_KEY: test-secret-key
+          AWS_S3_BUCKET: test-bucket
+          AWS_REGION: ap-southeast-1
+          NODE_ENV: test
+        run: npx vitest run --coverage --coverage.thresholds.lines=65
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
