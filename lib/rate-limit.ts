@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Redis } from "@upstash/redis";
 
 interface RateLimitStore {
   [key: string]: {
@@ -12,32 +13,27 @@ const store: RateLimitStore = {};
 const MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX || "100", 10);
 const WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10); // 15 minutes
 
-// Redis client (optional) - falls back to in-memory if unavailable
-let redisClient: any = null;
+// Upstash Redis client (optional) - falls back to in-memory if unavailable
+let redisClient: Redis | null = null;
 let redisAvailable = false;
 
-// Try to initialize Redis if available
-async function initRedis() {
-  if (process.env.REDIS_URL) {
-    try {
-      // Dynamic import to avoid requiring Redis as a dependency
-      const { createClient } = await import("redis");
-      redisClient = createClient({ url: process.env.REDIS_URL });
-      await redisClient.connect();
-      redisAvailable = true;
-      console.log("[RateLimit] Redis connected successfully");
-    } catch (error) {
-      console.warn("[RateLimit] Redis unavailable, using in-memory fallback:", error);
-      redisAvailable = false;
-      redisClient = null;
-    }
+// Try to initialize Upstash Redis if environment variables are set
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  try {
+    redisClient = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    redisAvailable = true;
+    console.log("[RateLimit] Upstash Redis configured");
+  } catch (error) {
+    console.warn("[RateLimit] Upstash Redis configuration failed, using in-memory fallback:", error);
+    redisAvailable = false;
+    redisClient = null;
   }
+} else {
+  console.log("[RateLimit] Using in-memory rate limiting (set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN for distributed rate limiting)");
 }
-
-// Initialize Redis on first import (but don't block)
-initRedis().catch(() => {
-  // Silently fall back to in-memory
-});
 
 /**
  * In-memory rate limiter (fallback when Redis unavailable)
@@ -92,7 +88,7 @@ function rateLimitInMemory(identifier: string): {
 }
 
 /**
- * Rate limiter with Redis support and in-memory fallback
+ * Rate limiter with Upstash Redis support and in-memory fallback
  */
 async function rateLimitWithRedis(identifier: string): Promise<{
   success: boolean;
@@ -104,15 +100,18 @@ async function rateLimitWithRedis(identifier: string): Promise<{
 
   if (redisAvailable && redisClient) {
     try {
-      const multi = redisClient.multi();
-      multi.incr(key);
-      multi.expire(key, Math.ceil(WINDOW_MS / 1000));
-      multi.ttl(key);
+      // Upstash Redis uses REST API, different from node-redis
+      const count = await redisClient.incr(key);
 
-      const [count, , ttl] = await multi.exec();
-      const resetTime = now + (ttl as number) * 1000;
+      // Set expiry only on first increment
+      if (count === 1) {
+        await redisClient.expire(key, Math.ceil(WINDOW_MS / 1000));
+      }
 
-      if ((count as number) > MAX_REQUESTS) {
+      const ttl = await redisClient.ttl(key);
+      const resetTime = now + (ttl > 0 ? ttl * 1000 : WINDOW_MS);
+
+      if (count > MAX_REQUESTS) {
         return {
           success: false,
           remaining: 0,
@@ -122,11 +121,11 @@ async function rateLimitWithRedis(identifier: string): Promise<{
 
       return {
         success: true,
-        remaining: MAX_REQUESTS - (count as number),
+        remaining: MAX_REQUESTS - count,
         resetTime,
       };
     } catch (error) {
-      console.warn("[RateLimit] Redis error, falling back to in-memory:", error);
+      console.warn("[RateLimit] Upstash Redis error, falling back to in-memory:", error);
       redisAvailable = false;
       // Fall through to in-memory fallback
     }
