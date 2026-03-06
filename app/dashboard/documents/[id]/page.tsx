@@ -130,7 +130,10 @@ export default function DocumentDetailPage() {
   };
 
   useEffect(() => {
-    if (id) fetchDoc();
+    if (id) {
+      fetchDoc();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const handleDownload = async () => {

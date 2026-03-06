@@ -105,9 +105,9 @@ export default function AnalyticsPage() {
   if (!data) return null;
 
   const { overview, documentsByStatus, recentActivity, topUploaders } = data;
-  const storageUsed = Number(overview.storageUsed);
-  const storageLimit = Number(overview.storageLimit);
-  const storagePercent = Math.min(100, overview.storageUsedPercentage);
+  const storageUsed = Number(overview.storageUsed) || 0;
+  const storageLimit = Number(overview.storageLimit) || 0;
+  const storagePercent = Math.min(100, overview.storageUsedPercentage || 0);
 
   const totalDocs = documentsByStatus.reduce((sum, s) => sum + s._count.status, 0) || 1;
 

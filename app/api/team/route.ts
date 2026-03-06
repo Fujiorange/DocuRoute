@@ -20,11 +20,11 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         name: true,
-        email: isAdminRole ? true : false,
+        email: isAdminRole,
         role: true,
         isActive: true,
         createdAt: true,
-        twoFactorEnabled: isAdminRole ? true : false,
+        twoFactorEnabled: isAdminRole,
       },
       orderBy: { createdAt: "asc" },
       skip,
