@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+  roles     CustomRole[]
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  name        String?
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  systemRole  SystemRole @default(DOCUMENT_CONTROLLER)
+  customRoles UserCustomRole[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CustomRole {
+  id          String   @id @default(cuid())
+  name        String
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  permissions String[]
+  users       UserCustomRole[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, name])
+}
+
+model UserCustomRole {
+  userId       String
+  customRoleId String
+  user         User       @relation(fields: [userId], references: [id])
+  customRole   CustomRole @relation(fields: [customRoleId], references: [id])
+
+  @@id([userId, customRoleId])
+}
+
+enum SystemRole {
+  COMPANY_OWNER
+  COMPANY_ADMIN
+  DOCUMENT_CONTROLLER
+  AUDITOR
+  BILLING_CONTACT
+  PLATFORM_ADMIN
+}
