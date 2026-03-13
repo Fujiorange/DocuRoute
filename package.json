@@ -1,11 +1,15 @@
 {
   "name": "docuroute",
   "private": true,
+  "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.8.16"
   }
 }
