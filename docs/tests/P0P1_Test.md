@@ -11,7 +11,7 @@ find /home/runner/work/DocuRoute/DocuRoute -not -path '*/\.*' -not -path '*/node
 ```
 
 Expected top-level structure:
-- `apps/web/` — Next.js 14 App Router
+- `apps/web/` — Next.js 15 App Router
 - `apps/worker/` — Node.js BullMQ worker
 - `packages/core/` — shared business logic
 - `packages/db/` — Prisma schema and client
@@ -44,7 +44,7 @@ Check `/home/runner/work/DocuRoute/DocuRoute/turbo.json`:
 ## 4. Verify apps/web Next.js Setup
 
 Files to check:
-- `apps/web/package.json` — name `@docuroute/web`, next@14.2.29 dependency
+- `apps/web/package.json` — name `@docuroute/web`, next@15.3.9 dependency
 - `apps/web/tsconfig.json` — moduleResolution bundler, jsx preserve, paths `@/*`
 - `apps/web/next.config.ts` — transpilePackages for all @docuroute/* packages
 - `apps/web/tailwind.config.ts` — darkMode class, full color palette with CSS vars

@@ -9,7 +9,7 @@ This document summarizes the complete production-grade monorepo scaffold created
 ```
 DocuRoute/
   apps/
-    web/          ← Next.js 14 App Router (Vercel deployment target)
+    web/          ← Next.js 15 App Router (Vercel deployment target)
     worker/       ← Node.js BullMQ worker process
   packages/
     core/         ← Shared business logic (zero framework imports)
@@ -58,7 +58,7 @@ The `packages/core` package contains ONLY pure TypeScript business logic with NO
 - BullMQ worker processes
 - Any future services (microservices, CLI tools, etc.)
 
-### apps/web: Next.js 14 App Router
+### apps/web: Next.js 15 App Router
 - Full shadcn/ui component library (21 components)
 - Tailwind CSS with CSS variables for theming
 - Dark mode support via `darkMode: ["class"]`
@@ -89,7 +89,7 @@ The multi-tenant schema supports:
 - **UserCustomRole** — many-to-many join table (users can have multiple custom roles)
 
 ## Tech Stack
-- **Frontend**: Next.js 14 App Router, React 18, TypeScript, Tailwind CSS, shadcn/ui
+- **Frontend**: Next.js 15 App Router, React 18, TypeScript, Tailwind CSS, shadcn/ui
 - **Backend**: Next.js API Routes / Server Actions, Prisma ORM
 - **Database**: PostgreSQL (Supabase)
 - **Storage**: Cloudflare R2 (planned)

@@ -9,7 +9,7 @@ Hybrid PBAC + System Roles:
 - Custom roles (DB-driven): companies create roles with any Permission subset
 
 ## Tech Stack
-Next.js 14, TypeScript, Tailwind, shadcn/ui, Prisma, PostgreSQL (Supabase),
+Next.js 15, TypeScript, Tailwind, shadcn/ui, Prisma, PostgreSQL (Supabase),
 Cloudflare R2, NextAuth v5 (stable), Resend, Stripe, BullMQ + ioredis,
 workerpool (PDF processing), qrcode (field safety verification)
 
