@@ -8,10 +8,25 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@docuroute/types": "workspace:*"
+    "@aws-sdk/client-kms": "^3.1008.0",
+    "@aws-sdk/client-s3": "^3.1008.0",
+    "@aws-sdk/s3-request-presigner": "^3.1008.0",
+    "@docuroute/types": "workspace:*",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.37.0",
+    "bullmq": "^5.71.0",
+    "date-fns": "^4.1.0",
+    "fuse.js": "^7.1.0",
+    "ioredis": "^5.10.0",
+    "qrcode": "^1.5.4",
+    "resend": "^6.9.3",
+    "slugify": "^1.6.6",
+    "workerpool": "^10.0.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "typescript": "^5"
   }
 }
