@@ -9,52 +9,67 @@ generator client {
 }
 
 model Role {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   companyId     String
   name          String
   description   String?
-  isSystemRole  Boolean   @default(false)
+  isSystemRole  Boolean  @default(false)
   systemRoleKey String?
-  permissions   String[]  // Permission enum values; ignored for system roles
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  company       Company   @relation(fields: [companyId], references: [id])
+  permissions   String[] // Permission enum values; ignored for system roles
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id])
   users         User[]
-
-  @@unique([companyId, name])
-  @@index([companyId, isSystemRole])
   // GIN index for permission queries — add via raw SQL after migration:
   // CREATE INDEX idx_role_permissions ON "Role" USING GIN (permissions);
   // Required by createNotificationsForPermission to avoid full-table scans.
+
+  @@unique([companyId, name])
+  @@index([companyId, isSystemRole])
 }
 
 model Company {
-  id                        String    @id @default(cuid())
-  name                      String
-  slug                      String    @unique
-  planTier                  String    @default("PILOT")
-  recycleBinRetentionDays   Int       @default(90)
-  transmittalTemplate       Json?
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
-  roles                     Role[]
-  users                     User[]
+  id                             String             @id @default(cuid())
+  name                           String
+  slug                           String             @unique
+  planTier                       String             @default("PILOT")
+  recycleBinRetentionDays        Int                @default(90)
+  bulkOperationUndoWindowMinutes Int                @default(30)
+  transmittalTemplate            Json?
+  // Feature flags for plan-gated capabilities.
+  // Expected shape: { "customRoles": boolean, "advancedWorkflows": boolean, "scim": boolean }
+  // Unset key = feature disabled. Never rely on absent key = enabled.
+  // Set at onboarding. Modifiable by PLATFORM_ADMIN only.
+  features                       Json?
+  // Per-company security policy overrides.
+  // Expected shape: { "mfaRequired": boolean, "sessionTimeoutMinutes": number }
+  // If null, system defaults apply.
+  securitySettings               Json?
+  createdAt                      DateTime           @default(now())
+  updatedAt                      DateTime           @updatedAt
+  roles                          Role[]
+  users                          User[]
+  projects                       Project[]
+  documents                      Document[]
+  documentRevisions              DocumentRevision[]
+  onboarding                     CompanyOnboarding?
+  notifications                  Notification[]
 }
 
 model User {
-  id                  String    @id @default(cuid())
-  email               String    @unique
-  name                String?
-  companyId           String
-  roleId              String
-  isActive            Boolean   @default(false)
-  mfaEnabled          Boolean   @default(false)
-  mfaSecret           String?
-  scimDeprovisioned   Boolean   @default(false)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  company             Company   @relation(fields: [companyId], references: [id])
-  role                Role      @relation(fields: [roleId], references: [id])
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  companyId         String
+  roleId            String
+  isActive          Boolean  @default(false)
+  mfaEnabled        Boolean  @default(false)
+  mfaSecret         String?
+  scimDeprovisioned Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  company           Company  @relation(fields: [companyId], references: [id])
+  role              Role     @relation(fields: [roleId], references: [id])
 
   @@index([companyId, roleId])
   @@index([companyId, isActive])
@@ -63,48 +78,82 @@ model User {
 // Minimal Project model — required for Document.projectId FK
 // Phase 2 adds full project management fields
 model Project {
-  id          String    @id @default(cuid())
-  companyId   String
-  name        String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        String     @id @default(cuid())
+  companyId String
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  company   Company    @relation(fields: [companyId], references: [id])
+  documents Document[]
 
   @@index([companyId])
+}
+
+model Document {
+  id         String  @id @default(cuid())
+  companyId  String
+  projectId  String?
+  filename   String
+  fileKey    String
+  fileSize   Int
+  mimeType   String
+  sha256Hash String
+  uploadedBy String // userId
+
+  // Industry fields — required from day 1, not deferred to Phase 2.
+  // Field workers need discipline and issue purpose the moment a document is uploaded.
+  discipline   String? // EngineeringDiscipline enum value
+  issuePurpose String? // IssuePurpose enum value
+
+  status               String    @default("PENDING") // DocumentStatus enum value
+  virusScanStatus      String    @default("PENDING") // VirusScanStatus enum value
+  virusScanCompletedAt DateTime?
+  watermarkStatus      String    @default("PENDING") // WatermarkStatus enum value
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  company              Company   @relation(fields: [companyId], references: [id])
+  project              Project?  @relation(fields: [projectId], references: [id])
+
+  @@index([companyId, status])
+  @@index([companyId, createdAt])
+  @@index([companyId, projectId])
 }
 
 // Minimal DocumentRevision model — required for QR verification route
 // Phase 2 extends this to full DocumentRecord/Revision split
 model DocumentRevision {
-  id            String    @id @default(cuid())
-  documentId    String
-  companyId     String
-  revisionCode  String
-  fileKey       String
-  fileSize      Int
-  sha256Hash    String
-  issuePurpose  String?   // IssuePurpose enum value
-  status        String    @default("CURRENT") // CURRENT | SUPERSEDED | DRAFT
-  watermarkStatus String  @default("PENDING") // WatermarkStatus enum value
+  id               String   @id @default(cuid())
+  documentId       String
+  companyId        String
+  revisionCode     String
+  fileKey          String
+  fileSize         Int
+  sha256Hash       String
+  discipline       String? // EngineeringDiscipline enum value
+  issuePurpose     String? // IssuePurpose enum value
+  status           String   @default("CURRENT") // CURRENT | SUPERSEDED | DRAFT
+  watermarkStatus  String   @default("PENDING") // WatermarkStatus enum value
   watermarkFileKey String?
-  uploadedBy    String
-  createdAt     DateTime  @default(now())
+  uploadedBy       String
+  createdAt        DateTime @default(now())
+  company          Company  @relation(fields: [companyId], references: [id])
 
   @@index([documentId, status])
   @@index([companyId])
 }
 
 model AuditLog {
-  id               String    @id @default(cuid())
-  companyId        String
-  userId           String?
-  action           String    // AuditAction enum value
-  resourceType     String?
-  resourceId       String?
-  ipAddress        String?
-  userAgent        String?
-  permissionsUsed  String[]  // Permission enum values used to authorise this action
-  metadata         Json?
-  createdAt        DateTime  @default(now())
+  id              String   @id @default(cuid())
+  companyId       String
+  userId          String?
+  action          String // AuditAction enum value
+  resourceType    String?
+  resourceId      String?
+  ipAddress       String?
+  userAgent       String?
+  permissionsUsed String[] // Permission enum values used to authorise this action
+  metadata        Json?
+  createdAt       DateTime @default(now())
 
   @@index([companyId, createdAt])
   @@index([companyId, action])
@@ -130,33 +179,33 @@ model AuditLog {
 // Verify trigger is active:
 //   SELECT tgname FROM pg_trigger WHERE tgrelid = '"AuditVaultEntry"'::regclass;
 model AuditVaultEntry {
-  id                  String    @id @default(cuid())
+  id                  String   @id @default(cuid())
   companyId           String
-  eventType           String    // AuditVaultEventType enum value
+  eventType           String // AuditVaultEventType enum value
   userId              String?
-  userEmail           String    // snapshot — never rely on FK for compliance
+  userEmail           String // snapshot — never rely on FK for compliance
   ipAddress           String?
   userAgent           String?
-  permissionsUsed     String[]  // Permission[] that were verified before this event
+  permissionsUsed     String[] // Permission[] that were verified before this event
   metadata            Json?
-  documentFingerprint String?   // SHA-256 of document file at event time
-  hash                String    // SHA-256 integrity hash of this record
-  createdAt           DateTime  // Set explicitly by application — NOT @default(now())
-                                // Must match value used to compute hash field above
+  documentFingerprint String? // SHA-256 of document file at event time
+  hash                String // SHA-256 integrity hash of this record
+  createdAt           DateTime // Set explicitly by application — NOT @default(now())
+  // Must match value used to compute hash field above
 
   @@index([companyId, createdAt])
   @@index([companyId, eventType])
 }
 
 model Invitation {
-  id          String    @id @default(cuid())
-  email       String
-  companyId   String
-  roleId      String    // FK to Role table — not a role name string
-  token       String    @unique
-  expiresAt   DateTime
-  acceptedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  id         String    @id @default(cuid())
+  email      String
+  companyId  String
+  roleId     String // FK to Role table — not a role name string
+  token      String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
 
   @@index([token])
   @@index([email, companyId])
@@ -165,6 +214,36 @@ model Invitation {
 model TransmittalCounter {
   companyId String
   year      Int
-  sequence  Int        @default(0)
+  sequence  Int    @default(0)
+
   @@id([companyId, year])
+}
+
+model CompanyOnboarding {
+  id             String   @id @default(cuid())
+  companyId      String   @unique
+  completedSteps String[] @default([])
+  // Valid step values:
+  //   'FIRST_PROJECT_CREATED' | 'FIRST_DOCUMENT_UPLOADED' |
+  //   'FIRST_TEAM_MEMBER_INVITED' | 'NAMING_MASK_CONFIGURED' |
+  //   'FIRST_WORKFLOW_STARTED'
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  type      String // NotificationType enum value
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([companyId, createdAt])
 }
