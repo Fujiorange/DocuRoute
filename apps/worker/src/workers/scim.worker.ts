@@ -25,7 +25,7 @@ export function createSCIMWorker(userId: string) {
 
       console.log(`SCIM ${operation} for user ${userId} in company ${companyId}`)
 
-      const prisma = getPrismaForCompany(companyId)
+      const prisma = getPrismaForCompany(companyId) as any
 
       try {
         switch (operation) {

@@ -31,7 +31,7 @@ const watermarkWorker = new Worker(
       await saveCachedWatermark(watermarkFileKey, watermarkedBuffer)
 
       // Update database
-      const prisma = getPrismaForCompany(companyId)
+      const prisma = getPrismaForCompany(companyId) as any
       await prisma.documentRevision.update({
         where: { id: documentRevisionId },
         data: {
@@ -53,7 +53,7 @@ const watermarkWorker = new Worker(
       }
 
       // Update database with failure status
-      const prisma = getPrismaForCompany(companyId)
+      const prisma = getPrismaForCompany(companyId) as any
       await prisma.documentRevision.update({
         where: { id: documentRevisionId },
         data: { watermarkStatus },

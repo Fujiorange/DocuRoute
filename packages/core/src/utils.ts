@@ -26,14 +26,14 @@ export function generateSlug(text: string): string {
 
 export async function hashSHA256(data: string): Promise<string> {
   // Node.js environment
-  if (typeof window === 'undefined') {
+  if (typeof (globalThis as any).window === 'undefined') {
     const crypto = await import('crypto')
     return crypto.createHash('sha256').update(data).digest('hex')
   }
   // Browser environment
   const encoder = new TextEncoder()
   const dataBuffer = encoder.encode(data)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer)
+  const hashBuffer = await (globalThis as any).crypto.subtle.digest('SHA-256', dataBuffer)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
 }

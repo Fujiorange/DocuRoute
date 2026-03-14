@@ -322,6 +322,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1008.0
         version: 3.1008.0
+      '@docuroute/db':
+        specifier: workspace:*
+        version: link:../db
       '@docuroute/types':
         specifier: workspace:*
         version: link:../types
@@ -334,6 +337,9 @@ importers:
       bullmq:
         specifier: ^5.71.0
         version: 5.71.0
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
@@ -352,6 +358,9 @@ importers:
       slugify:
         specifier: ^1.6.6
         version: 1.6.6
+      tailwind-merge:
+        specifier: ^2.6.1
+        version: 2.6.1
       workerpool:
         specifier: ^10.0.1
         version: 10.0.1

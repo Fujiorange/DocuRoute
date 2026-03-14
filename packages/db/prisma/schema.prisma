@@ -110,27 +110,25 @@ model AuditLog {
   @@index([companyId, action])
 }
 
-/*
- * AuditVaultEntry — IMMUTABLE compliance log.
- * INSERT ONLY. The database trigger below enforces this at the DB level.
- * Application code must never call update() or delete() on this model.
- *
- * REQUIRED SQL — run in Supabase SQL Editor after every schema migration:
- *
- *   CREATE OR REPLACE FUNCTION prevent_audit_vault_mutation()
- *   RETURNS TRIGGER AS $$
- *   BEGIN
- *     RAISE EXCEPTION 'AuditVaultEntry is INSERT ONLY. Tampering detected.';
- *   END;
- *   $$ LANGUAGE plpgsql;
- *
- *   CREATE TRIGGER audit_vault_immutable
- *   BEFORE UPDATE OR DELETE ON "AuditVaultEntry"
- *   FOR EACH ROW EXECUTE FUNCTION prevent_audit_vault_mutation();
- *
- * Verify trigger is active:
- *   SELECT tgname FROM pg_trigger WHERE tgrelid = '"AuditVaultEntry"'::regclass;
- */
+// AuditVaultEntry — IMMUTABLE compliance log.
+// INSERT ONLY. The database trigger below enforces this at the DB level.
+// Application code must never call update() or delete() on this model.
+//
+// REQUIRED SQL — run in Supabase SQL Editor after every schema migration:
+//
+//   CREATE OR REPLACE FUNCTION prevent_audit_vault_mutation()
+//   RETURNS TRIGGER AS $$
+//   BEGIN
+//     RAISE EXCEPTION 'AuditVaultEntry is INSERT ONLY. Tampering detected.';
+//   END;
+//   $$ LANGUAGE plpgsql;
+//
+//   CREATE TRIGGER audit_vault_immutable
+//   BEFORE UPDATE OR DELETE ON "AuditVaultEntry"
+//   FOR EACH ROW EXECUTE FUNCTION prevent_audit_vault_mutation();
+//
+// Verify trigger is active:
+//   SELECT tgname FROM pg_trigger WHERE tgrelid = '"AuditVaultEntry"'::regclass;
 model AuditVaultEntry {
   id                  String    @id @default(cuid())
   companyId           String

@@ -18,9 +18,9 @@ const POOL_SIZE = 2
 const MAX_WORKER_MEMORY_MB = 512
 const MAX_WATERMARK_SIZE_BYTES = 200 * 1024 * 1024 // 200MB
 
-let pool: workerpool.WorkerPool | null = null
+let pool: any = null
 
-function getPool(): workerpool.WorkerPool {
+function getPool(): any {
   if (!pool) {
     const workerPath = path.join(__dirname, '../scripts/watermark-child.js')
     pool = workerpool.pool(workerPath, {
@@ -29,8 +29,7 @@ function getPool(): workerpool.WorkerPool {
       forkOpts: {
         execArgv: [`--max-old-space-size=${MAX_WORKER_MEMORY_MB}`],
       },
-      timeout: 60_000, // 60 seconds
-    })
+    } as any)
   }
   return pool
 }

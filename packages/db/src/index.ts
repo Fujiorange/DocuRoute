@@ -51,7 +51,7 @@ export function getPrismaForCompany(companyId: string) {
   const extended = prismaAdmin.$extends({
     query: {
       $allModels: {
-        async $allOperations({ args, query }) {
+        async $allOperations({ args, query }: any) {
           if (args.where !== undefined) {
             args.where = { ...args.where, companyId }
           }

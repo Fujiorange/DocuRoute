@@ -10,8 +10,8 @@ import { AuditAction, AuditVaultEventType } from '@docuroute/types'
  * Never check role names directly  always check permissions.
  *
  * Resolution:
- *   role.isSystemRole ’ permissions from SYSTEM_ROLE_PERMISSIONS[role.systemRoleKey]
- *   !role.isSystemRole ’ permissions from role.permissions[] stored in DB
+ *   role.isSystemRole ï¿½ permissions from SYSTEM_ROLE_PERMISSIONS[role.systemRoleKey]
+ *   !role.isSystemRole ï¿½ permissions from role.permissions[] stored in DB
  *
  * TRANSACTION RULE  CRITICAL:
  *   requireLivePermission calls prismaAdmin directly (not via getPrismaForCompany).
@@ -21,7 +21,7 @@ import { AuditAction, AuditVaultEventType } from '@docuroute/types'
  *
  * AUTH LIBRARY VERSION:
  *   Uses next-auth stable v4. Never pin to a beta version.
- *   Verify: pnpm list --filter web next-auth ’ must NOT contain "beta".
+ *   Verify: pnpm list --filter web next-auth ï¿½ must NOT contain "beta".
  */
 
 export type ResolvedUser = {
@@ -179,7 +179,7 @@ export function withApiHandler<T>(
 
           await writeVaultEntry({
             companyId,
-            eventType: AuditVaultEventType.PERMISSION_DENIED as any,
+            eventType: 'PERMISSION_DENIED' as any, // TODO: Add to AuditVaultEventType enum
             userId,
             userEmail,
             metadata: {
