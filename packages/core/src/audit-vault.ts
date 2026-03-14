@@ -67,45 +67,64 @@ export async function writeVaultEntry(params: {
 export async function verifyVaultIntegrity(
   companyId: string,
   startDate: Date,
-  endDate: Date
-): Promise<{ valid: boolean; tampered: string[] }> {
+  endDate: Date,
+  batchSize = 1000 // PERFORMANCE: Process in batches to prevent memory exhaustion
+): Promise<{ valid: boolean; tampered: string[]; totalChecked: number }> {
   try {
     // Uses prismaAdmin: vault integrity checks are compliance operations
-    const entries = await prismaAdmin.auditVaultEntry.findMany({
-      where: {
-        companyId,
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    })
-
+    // PERFORMANCE: Paginate through entries instead of loading all at once
+    let cursor: string | undefined
+    let totalChecked = 0
     const tampered: string[] = []
 
-    for (const entry of entries) {
-      const metadataStr = JSON.stringify(entry.metadata || {})
-      const hashInput = [
-        entry.companyId,
-        entry.eventType,
-        entry.userId || '',
-        entry.createdAt.toISOString(),
-        metadataStr,
-      ].join('|')
-      const computedHash = await hashSHA256(hashInput)
+    while (true) {
+      const entries = await prismaAdmin.auditVaultEntry.findMany({
+        where: {
+          companyId,
+          createdAt: {
+            gte: startDate,
+            lte: endDate,
+          },
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: batchSize,
+      })
 
-      if (computedHash !== entry.hash) {
-        tampered.push(entry.id)
+      if (entries.length === 0) break
+
+      // PERFORMANCE: Consider parallel hash verification within batch
+      // Current implementation: sequential for simplicity
+      // For optimization, see docs/PERFORMANCE_ANALYSIS.md section 2.2
+      for (const entry of entries) {
+        const metadataStr = JSON.stringify(entry.metadata || {})
+        const hashInput = [
+          entry.companyId,
+          entry.eventType,
+          entry.userId || '',
+          entry.createdAt.toISOString(),
+          metadataStr,
+        ].join('|')
+        const computedHash = await hashSHA256(hashInput)
+
+        if (computedHash !== entry.hash) {
+          tampered.push(entry.id)
+        }
       }
+
+      totalChecked += entries.length
+      cursor = entries[entries.length - 1].id
+
+      // Optional: If this needs to be long-running, consider adding progress callbacks
     }
 
     return {
       valid: tampered.length === 0,
       tampered,
+      totalChecked,
     }
   } catch (error) {
     console.error('Failed to verify vault integrity:', error)
-    return { valid: false, tampered: [] }
+    return { valid: false, tampered: [], totalChecked: 0 }
   }
 }

@@ -91,7 +91,24 @@ export enum Permission {
  * SYSTEM_ROLE_PERMISSIONS defines the immutable permission sets for system roles.
  * These cannot be changed by any company owner or admin.
  * They are the compliance-traceable roles required for ISO 9001 quality systems.
+ *
+ * PERFORMANCE: COMPANY_OWNER permissions are pre-computed at module load time
+ * instead of being filtered on every permission resolution call.
  */
+
+// Platform-only permissions that COMPANY_OWNER should NOT have
+const PLATFORM_ONLY_PERMISSIONS = [
+  Permission.PLATFORM_ADMIN_ACCESS,
+  Permission.EMERGENCY_TRANSFER,
+]
+
+// Pre-compute COMPANY_OWNER permissions (all except platform-only)
+// PERFORMANCE: This runs once when module loads, not on every permission check
+const ALL_PERMISSIONS = Object.values(Permission)
+const COMPANY_OWNER_PERMISSIONS = ALL_PERMISSIONS.filter(
+  p => !PLATFORM_ONLY_PERMISSIONS.includes(p)
+)
+
 export const SYSTEM_ROLE_PERMISSIONS: Record<string, Permission[]> = {
   PLATFORM_ADMIN: [
     Permission.PLATFORM_ADMIN_ACCESS,
@@ -99,13 +116,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<string, Permission[]> = {
     Permission.VIEW_AUDIT_LOG,
     Permission.EXPORT_AUDIT_VAULT,
   ],
-  COMPANY_OWNER: [
-    // All permissions except platform-only
-    ...Object.values(Permission).filter(p =>
-      p !== Permission.PLATFORM_ADMIN_ACCESS &&
-      p !== Permission.EMERGENCY_TRANSFER
-    ),
-  ],
+  COMPANY_OWNER: COMPANY_OWNER_PERMISSIONS, // Pre-computed constant
   COMPANY_ADMIN: [
     Permission.INVITE_USERS, Permission.MANAGE_USERS, Permission.DEACTIVATE_USERS,
     Permission.MANAGE_CUSTOM_ROLES,

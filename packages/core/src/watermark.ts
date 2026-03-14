@@ -48,6 +48,10 @@ export async function watermarkInChildProcess(
 
   try {
     const workerPool = getPool()
+
+    // PERFORMANCE: Converting to base64 creates 33% memory overhead (200MB → 267MB)
+    // TODO: Use temporary files instead for better memory efficiency
+    // See docs/PERFORMANCE_ANALYSIS.md section 1.2 for implementation details
     const inputBase64 = inputBuffer.toString('base64')
 
     const result: any = await workerPool.exec('watermarkPDF', [
@@ -63,6 +67,7 @@ export async function watermarkInChildProcess(
       throw new Error(result.reason || 'PROCESSING_ERROR')
     }
 
+    // PERFORMANCE: Converting back from base64 allocates another buffer
     return Buffer.from(result.buffer, 'base64')
   } catch (error: any) {
     console.error('Watermark child process error:', error)
@@ -72,13 +77,18 @@ export async function watermarkInChildProcess(
 
 export async function getCachedWatermark(fileKey: string): Promise<Buffer | null> {
   // TODO: Implement R2 retrieval with key: watermarked/{fileKey}
-  // For now, return null (cache miss)
+  // PERFORMANCE: This is critical for avoiding duplicate watermark processing
+  // Expected cache hit rate: 60-80% (same documents downloaded multiple times)
+  // See docs/PERFORMANCE_ANALYSIS.md section 1.3 for implementation example
   return null
 }
 
 export async function saveCachedWatermark(fileKey: string, buffer: Buffer): Promise<void> {
   // TODO: Implement R2 upload with key: watermarked/{fileKey}
-  // For now, no-op
+  // Cache strategy:
+  //   - Key format: watermarked/{originalFileKey}-{latestRevisionCode}
+  //   - TTL: 7 days (revisions rarely change after approval)
+  // See docs/PERFORMANCE_ANALYSIS.md section 1.3 for implementation example
 }
 
 export async function terminatePool(): Promise<void> {

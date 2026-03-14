@@ -58,6 +58,26 @@ export async function resolvePermissions(roleId: string): Promise<Permission[]> 
 }
 
 /**
+ * resolvePermissionsFromRole
+ *
+ * Resolves effective permissions from a role object (already fetched from DB).
+ * Used to avoid redundant DB queries when role is already available.
+ * PERFORMANCE: Use this instead of resolvePermissions() when you already have the role.
+ */
+export function resolvePermissionsFromRole(role: {
+  isSystemRole: boolean
+  systemRoleKey: string | null
+  permissions: string[]
+}): Permission[] {
+  if (role.isSystemRole && role.systemRoleKey) {
+    const systemKey = role.systemRoleKey as SystemRoleKey
+    return SYSTEM_ROLE_PERMISSIONS[systemKey] || []
+  }
+
+  return (role.permissions as Permission[]) || []
+}
+
+/**
  * requirePermission
  *
  * Throws forbidden() if session does not have ANY of the allowed permissions.
@@ -101,6 +121,9 @@ export function requirePermissions(session: ResolvedUser | null, required: Permi
  * Throws 401 if user inactive or companyId mismatch (JWT tampering detection).
  * Throws 403 if permission not in allowed set.
  * Logs PERMISSION_DENIED to AuditLog on 403.
+ *
+ * PERFORMANCE: This function makes ONE DB query (user + role via include).
+ * Previously made TWO queries by calling resolvePermissions() which fetched role again.
  */
 export async function requireLivePermission(
   session: ResolvedUser | null,
@@ -114,6 +137,7 @@ export async function requireLivePermission(
   }
 
   // Uses prismaAdmin: fetches live user record to verify current permissions
+  // PERFORMANCE: Include role here to avoid second query
   const user = await prismaAdmin.user.findUnique({
     where: { id: session.userId },
     include: { role: true },
@@ -128,8 +152,9 @@ export async function requireLivePermission(
     throw unauthorized()
   }
 
-  // Resolve live permissions
-  const livePermissions = await resolvePermissions(user.roleId)
+  // PERFORMANCE: Use role data we already fetched instead of querying again
+  // This eliminates the redundant DB query that resolvePermissions() would make
+  const livePermissions = resolvePermissionsFromRole(user.role)
 
   // Check permission
   const hasPermission = allowed.some((p) => livePermissions.includes(p))

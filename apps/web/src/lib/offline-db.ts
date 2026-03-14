@@ -28,6 +28,7 @@ interface OfflineAction {
   status: string
   retryCount: number
   lastAttemptAt: Date | null
+  documentId?: string // PERFORMANCE: Added for compound index [documentId+status]
 }
 
 class DocuRouteOfflineDB extends Dexie {
@@ -37,9 +38,15 @@ class DocuRouteOfflineDB extends Dexie {
   constructor() {
     super('docuroute-offline-v1')
 
+    // PERFORMANCE: Added compound indexes for common query patterns
+    // - [companyId+projectId]: Filter documents by company and project
+    // - [projectId+status]: Find all active/archived documents in a project
+    // - [companyId+syncedAt]: Find documents needing sync for a company
+    // - [documentId+status]: Find pending actions for a specific document
+    // - [status+createdAt]: Process action queue in order
     this.version(1).stores({
-      documents: 'id, documentCode, projectId, companyId, status, syncedAt',
-      actions: '++id, type, status, createdAt',
+      documents: 'id, documentCode, projectId, companyId, status, syncedAt, [companyId+projectId], [projectId+status], [companyId+syncedAt]',
+      actions: '++id, type, status, createdAt, documentId, [documentId+status], [status+createdAt]',
     })
 
     this.documents = this.table('documents')
