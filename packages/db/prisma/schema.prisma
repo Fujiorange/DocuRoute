@@ -8,54 +8,165 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model Role {
+  id            String    @id @default(cuid())
+  companyId     String
+  name          String
+  description   String?
+  isSystemRole  Boolean   @default(false)
+  systemRoleKey String?
+  permissions   String[]  // Permission enum values; ignored for system roles
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  company       Company   @relation(fields: [companyId], references: [id])
+  users         User[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isSystemRole])
+  // GIN index for permission queries — add via raw SQL after migration:
+  // CREATE INDEX idx_role_permissions ON "Role" USING GIN (permissions);
+  // Required by createNotificationsForPermission to avoid full-table scans.
+}
+
 model Company {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users     User[]
-  roles     CustomRole[]
+  id                        String    @id @default(cuid())
+  name                      String
+  slug                      String    @unique
+  planTier                  String    @default("PILOT")
+  recycleBinRetentionDays   Int       @default(90)
+  transmittalTemplate       Json?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  roles                     Role[]
+  users                     User[]
 }
 
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  name        String?
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  systemRole  SystemRole @default(DOCUMENT_CONTROLLER)
-  customRoles UserCustomRole[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  name                String?
+  companyId           String
+  roleId              String
+  isActive            Boolean   @default(false)
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?
+  scimDeprovisioned   Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  company             Company   @relation(fields: [companyId], references: [id])
+  role                Role      @relation(fields: [roleId], references: [id])
+
+  @@index([companyId, roleId])
+  @@index([companyId, isActive])
 }
 
-model CustomRole {
-  id          String   @id @default(cuid())
+// Minimal Project model — required for Document.projectId FK
+// Phase 2 adds full project management fields
+model Project {
+  id          String    @id @default(cuid())
+  companyId   String
   name        String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId])
+}
+
+// Minimal DocumentRevision model — required for QR verification route
+// Phase 2 extends this to full DocumentRecord/Revision split
+model DocumentRevision {
+  id            String    @id @default(cuid())
+  documentId    String
+  companyId     String
+  revisionCode  String
+  fileKey       String
+  fileSize      Int
+  sha256Hash    String
+  issuePurpose  String?   // IssuePurpose enum value
+  status        String    @default("CURRENT") // CURRENT | SUPERSEDED | DRAFT
+  watermarkStatus String  @default("PENDING") // WatermarkStatus enum value
+  watermarkFileKey String?
+  uploadedBy    String
+  createdAt     DateTime  @default(now())
+
+  @@index([documentId, status])
+  @@index([companyId])
+}
+
+model AuditLog {
+  id               String    @id @default(cuid())
+  companyId        String
+  userId           String?
+  action           String    // AuditAction enum value
+  resourceType     String?
+  resourceId       String?
+  ipAddress        String?
+  userAgent        String?
+  permissionsUsed  String[]  // Permission enum values used to authorise this action
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, action])
+}
+
+/*
+ * AuditVaultEntry — IMMUTABLE compliance log.
+ * INSERT ONLY. The database trigger below enforces this at the DB level.
+ * Application code must never call update() or delete() on this model.
+ *
+ * REQUIRED SQL — run in Supabase SQL Editor after every schema migration:
+ *
+ *   CREATE OR REPLACE FUNCTION prevent_audit_vault_mutation()
+ *   RETURNS TRIGGER AS $$
+ *   BEGIN
+ *     RAISE EXCEPTION 'AuditVaultEntry is INSERT ONLY. Tampering detected.';
+ *   END;
+ *   $$ LANGUAGE plpgsql;
+ *
+ *   CREATE TRIGGER audit_vault_immutable
+ *   BEFORE UPDATE OR DELETE ON "AuditVaultEntry"
+ *   FOR EACH ROW EXECUTE FUNCTION prevent_audit_vault_mutation();
+ *
+ * Verify trigger is active:
+ *   SELECT tgname FROM pg_trigger WHERE tgrelid = '"AuditVaultEntry"'::regclass;
+ */
+model AuditVaultEntry {
+  id                  String    @id @default(cuid())
+  companyId           String
+  eventType           String    // AuditVaultEventType enum value
+  userId              String?
+  userEmail           String    // snapshot — never rely on FK for compliance
+  ipAddress           String?
+  userAgent           String?
+  permissionsUsed     String[]  // Permission[] that were verified before this event
+  metadata            Json?
+  documentFingerprint String?   // SHA-256 of document file at event time
+  hash                String    // SHA-256 integrity hash of this record
+  createdAt           DateTime  // Set explicitly by application — NOT @default(now())
+                                // Must match value used to compute hash field above
+
+  @@index([companyId, createdAt])
+  @@index([companyId, eventType])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  email       String
   companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  permissions String[]
-  users       UserCustomRole[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  roleId      String    // FK to Role table — not a role name string
+  token       String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
 
-  @@unique([companyId, name])
+  @@index([token])
+  @@index([email, companyId])
 }
 
-model UserCustomRole {
-  userId       String
-  customRoleId String
-  user         User       @relation(fields: [userId], references: [id])
-  customRole   CustomRole @relation(fields: [customRoleId], references: [id])
-
-  @@id([userId, customRoleId])
-}
-
-enum SystemRole {
-  COMPANY_OWNER
-  COMPANY_ADMIN
-  DOCUMENT_CONTROLLER
-  AUDITOR
-  BILLING_CONTACT
-  PLATFORM_ADMIN
+model TransmittalCounter {
+  companyId String
+  year      Int
+  sequence  Int        @default(0)
+  @@id([companyId, year])
 }
