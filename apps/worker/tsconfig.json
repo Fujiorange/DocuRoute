@@ -9,7 +9,13 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@docuroute/core": ["../../packages/core/src/index.ts"],
+      "@docuroute/db": ["../../packages/db/src/index.ts"],
+      "@docuroute/types": ["../../packages/types/src/index.ts"],
+      "@docuroute/emails": ["../../packages/emails/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

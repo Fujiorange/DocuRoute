@@ -1,0 +1,125 @@
+services:
+  - type: worker
+    name: docuroute-worker
+    runtime: node
+    # CRITICAL: Standard plan (2GB RAM) is the minimum.
+    # Custom roles mean unpredictable usage — a company can grant
+    # "Bulk Watermark" to any role they create. workerpool pools
+    # cap each PDF job at 512MB, but we need overhead for the pool
+    # manager, Redis connections, and concurrent SCIM operations.
+    plan: standard
+    buildCommand: pnpm install && pnpm --filter @docuroute/worker build
+    startCommand: pnpm --filter @docuroute/worker start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_OPTIONS
+        # 1536MB = 75% of 2GB. Leaves 512MB for OS + connection overhead.
+        value: --max-old-space-size=1536
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
+      - key: AWS_KMS_KEY_ARN
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: LOCAL_KMS_MODE
+        value: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: PLATFORM_ADMIN_EMAIL
+        sync: false
+      - key: QR_VERIFICATION_BASE_URL
+        sync: false
+
+  - type: cron
+    name: docuroute-retention-cron
+    runtime: node
+    plan: starter
+    schedule: "0 2 * * *"
+    buildCommand: pnpm install && pnpm --filter @docuroute/worker build
+    startCommand: node apps/worker/dist/crons/retention.js
+    envVars:
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=400
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: AWS_KMS_KEY_ARN
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: LOCAL_KMS_MODE
+        value: false
+      - key: CRON_SECRET
+        sync: false
+      - key: PLATFORM_ADMIN_EMAIL
+        sync: false
+
+  - type: cron
+    name: docuroute-vault-integrity-cron
+    runtime: node
+    plan: starter
+    schedule: "0 3 * * *"
+    buildCommand: pnpm install && pnpm --filter @docuroute/worker build
+    startCommand: node apps/worker/dist/crons/vault-integrity.js
+    envVars:
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=400
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: AWS_KMS_KEY_ARN
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: LOCAL_KMS_MODE
+        value: false
+      - key: CRON_SECRET
+        sync: false
+      - key: PLATFORM_ADMIN_EMAIL
+        sync: false
