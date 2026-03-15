@@ -7,6 +7,7 @@ import { Permission, AuditAction, PLAN_LIMITS, PlanTier } from '@docuroute/types
 import { validationError, notFound } from '@docuroute/core/src/errors'
 import { logAuditEvent } from '@docuroute/core/src/audit'
 import { inviteUserSchema } from '@/lib/validations/user'
+import { sendInvitationEmail } from '@/lib/email'
 import crypto from 'crypto'
 
 /**
@@ -179,9 +180,31 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     },
   })
 
-  // TODO: Send invitation email via Resend
-  // For now, just return the invitation with the magic link
+  // Get company name for email
+  const company = await prismaAdmin.company.findUnique({
+    where: { id: session.user.companyId },
+    select: { name: true },
+  })
+
+  // Send invitation email via Resend
   const magicLink = `${process.env.NEXTAUTH_URL}/auth/accept-invite?token=${token}`
+
+  try {
+    await sendInvitationEmail({
+      to: email,
+      companyName: company?.name || 'DocuRoute',
+      inviterName: session.user.name || session.user.email,
+      roleName: role.name,
+      isSystemRole: role.isSystemRole,
+      systemRoleKey: role.systemRoleKey || undefined,
+      acceptUrl: magicLink,
+      expiresAt,
+    })
+  } catch (emailError) {
+    console.error('Failed to send invitation email:', emailError)
+    // Don't fail the invitation creation if email fails
+    // The invitation is created and can be resent
+  }
 
   return new Response(
     JSON.stringify({
@@ -191,7 +214,6 @@ export const POST = withApiHandler(async (req: NextRequest) => {
         roleId: invitation.roleId,
         roleName: role.name,
         expiresAt: invitation.expiresAt.toISOString(),
-        magicLink, // In production, this would be sent via email only
       },
     }),
     {
