@@ -339,6 +339,9 @@ export const STANDARD_WORKFLOW_TEMPLATES = [
   },
 ] as const
 
+// ─── Role descriptions and permission labels ─────────────────────────────────
+export * from './role-descriptions'
+
 export const PLAN_LIMITS: Record<PlanTier, { users: number, storageGB: number, price: number }> = {
   STARTER:        { users: 10, storageGB: 500,  price: 200 },
   GROWTH:         { users: 10, storageGB: 1000, price: 350 },

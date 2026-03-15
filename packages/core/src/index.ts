@@ -13,6 +13,7 @@ export * from './audit'
 export * from './audit-vault'
 export * from './qr-verification'
 export * from './watermark'
+export * from './rate-limit'
 
 // Re-export types for convenience
 export type { Permission, SystemRoleKey, QRVerificationStatus } from '@docuroute/types'
