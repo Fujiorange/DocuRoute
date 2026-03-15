@@ -109,6 +109,7 @@ model Document {
   virusScanStatus      String    @default("PENDING") // VirusScanStatus enum value
   virusScanCompletedAt DateTime?
   watermarkStatus      String    @default("PENDING") // WatermarkStatus enum value
+  metadata             Json?     // For watermark skip acknowledgments and other custom data
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
   company              Company   @relation(fields: [companyId], references: [id])
