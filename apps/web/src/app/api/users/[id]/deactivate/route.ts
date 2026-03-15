@@ -31,7 +31,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   // Live permission check (mandatory for deactivation)
   await requireLivePermission(
     {
-      userId: session.user.id,
+      userId: session.user.userId,
       companyId: session.user.companyId,
       permissions: session.user.permissions,
       systemRoleKey: session.user.systemRoleKey,
@@ -52,7 +52,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   }
 
   // Cannot deactivate yourself
-  if (userId === session.user.id) {
+  if (userId === session.user.userId) {
     throw forbidden('deactivate your own account')
   }
 
@@ -144,7 +144,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     await tx.auditLog.create({
       data: {
         companyId: session.user.companyId, // Explicit companyId
-        userId: session.user.id,
+        userId: session.user.userId,
         action: AuditAction.USER_DEACTIVATED,
         resourceType: 'User',
         resourceId: userId,

@@ -37,7 +37,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   // Live permission check (required for mutations)
   await requireLivePermission(
     {
-      userId: session.user.id,
+      userId: session.user.userId,
       companyId: session.user.companyId,
       permissions: session.user.permissions,
       systemRoleKey: session.user.systemRoleKey,
@@ -164,7 +164,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
 
   // Log audit event
   await logAuditEvent({
-    userId: session.user.id,
+    userId: session.user.userId,
     companyId: session.user.companyId,
     action: AuditAction.USER_INVITED,
     ipAddress: req.headers.get('x-forwarded-for') || undefined,

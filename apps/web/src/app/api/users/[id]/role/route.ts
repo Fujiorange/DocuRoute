@@ -38,7 +38,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   // Live permission check (mandatory for role changes)
   await requireLivePermission(
     {
-      userId: session.user.id,
+      userId: session.user.userId,
       companyId: session.user.companyId,
       permissions: session.user.permissions,
       systemRoleKey: session.user.systemRoleKey,
@@ -168,7 +168,7 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     await tx.auditLog.create({
       data: {
         companyId: session.user.companyId, // Explicit companyId
-        userId: session.user.id,
+        userId: session.user.userId,
         action: AuditAction.USER_ROLE_CHANGED,
         resourceType: 'User',
         resourceId: userId,

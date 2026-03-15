@@ -28,7 +28,7 @@ export const GET = withApiHandler(async (req: NextRequest) => {
   // Check permission - user needs MANAGE_USERS or INVITE_USERS
   requirePermission(
     {
-      userId: session.user.id,
+      userId: session.user.userId,
       companyId: session.user.companyId,
       permissions: session.user.permissions,
       systemRoleKey: session.user.systemRoleKey,

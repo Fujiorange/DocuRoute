@@ -221,7 +221,7 @@ export default function UsersPage() {
             roles={roles}
             onRoleChange={handleRoleChange}
             onDeactivate={handleDeactivate}
-            currentUserId={session?.user?.id}
+            currentUserId={session?.user?.userId}
           />
         </CardContent>
       </Card>
