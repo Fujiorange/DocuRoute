@@ -214,7 +214,12 @@ export type QRVerificationStatus = {
   projectName: string
   verifiedAt: string
   latestRevisionCode?: string
+  watermarkSkipped?: boolean
 }
+
+// File size limits for upload and watermark processing
+export const MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024  // 500MB
+export const MAX_WATERMARK_SIZE_BYTES = 200 * 1024 * 1024  // 200MB
 
 export enum DocumentStatus {
   PENDING          = 'PENDING',
