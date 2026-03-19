@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useToast } from '@/hooks/use-toast'
 
 interface Role {
   id: string
@@ -23,14 +24,30 @@ interface Role {
 
 export function RoleList() {
   const { data: session } = useSession()
+  const { toast } = useToast()
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingRole, setEditingRole] = useState<Role | null>(null)
+  const [hasCustomRolesFeature, setHasCustomRolesFeature] = useState(false)
 
-  // Check if user has customRoles feature enabled
-  const hasCustomRolesFeature = true // TODO: This should come from session or company data
+  // Fetch company features to check if customRoles is enabled
+  useEffect(() => {
+    const fetchFeatures = async () => {
+      try {
+        const response = await fetch('/api/company/features')
+        if (response.ok) {
+          const data = await response.json()
+          setHasCustomRolesFeature(data.features?.customRoles === true)
+        }
+      } catch (err) {
+        // If fetch fails, default to false (silent fail - backend will enforce)
+        setHasCustomRolesFeature(false)
+      }
+    }
+    fetchFeatures()
+  }, [])
 
   const fetchRoles = async () => {
     try {
@@ -65,10 +82,18 @@ export function RoleList() {
         throw new Error(error.error?.message || 'Failed to create role')
       }
 
+      toast({
+        title: 'Role created',
+        description: `Successfully created role "${data.name}"`,
+      })
       await fetchRoles()
       setIsDialogOpen(false)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to create role')
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to create role',
+      })
     }
   }
 
@@ -87,11 +112,19 @@ export function RoleList() {
         throw new Error(error.error?.message || 'Failed to update role')
       }
 
+      toast({
+        title: 'Role updated',
+        description: `Successfully updated role "${data.name}"`,
+      })
       await fetchRoles()
       setEditingRole(null)
       setIsDialogOpen(false)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update role')
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to update role',
+      })
     }
   }
 
@@ -108,9 +141,17 @@ export function RoleList() {
         throw new Error(error.error?.message || 'Failed to delete role')
       }
 
+      toast({
+        title: 'Role deleted',
+        description: 'Successfully deleted the role',
+      })
       await fetchRoles()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete role')
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to delete role',
+      })
     }
   }
 

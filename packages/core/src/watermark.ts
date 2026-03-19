@@ -18,9 +18,11 @@ const POOL_SIZE = 2
 const MAX_WORKER_MEMORY_MB = 512
 const MAX_WATERMARK_SIZE_BYTES = 200 * 1024 * 1024 // 200MB
 
-let pool: any = null
+type WorkerPool = ReturnType<typeof workerpool.pool>
 
-function getPool(): any {
+let pool: WorkerPool | null = null
+
+function getPool(): WorkerPool {
   if (!pool) {
     const workerPath = path.join(__dirname, '../scripts/watermark-child.js')
     pool = workerpool.pool(workerPath, {
@@ -29,7 +31,7 @@ function getPool(): any {
       forkOpts: {
         execArgv: [`--max-old-space-size=${MAX_WORKER_MEMORY_MB}`],
       },
-    } as any)
+    })
   }
   return pool
 }
@@ -54,23 +56,30 @@ export async function watermarkInChildProcess(
     // See docs/PERFORMANCE_ANALYSIS.md section 1.2 for implementation details
     const inputBase64 = inputBuffer.toString('base64')
 
-    const result: any = await workerPool.exec('watermarkPDF', [
+    interface WatermarkResult {
+      success: boolean
+      buffer?: string
+      reason?: string
+    }
+
+    const result = await workerPool.exec('watermarkPDF', [
       {
         inputBase64,
         latestRevisionCode,
         documentId,
         revisionId,
       },
-    ])
+    ]) as WatermarkResult
 
     if (!result.success) {
       throw new Error(result.reason || 'PROCESSING_ERROR')
     }
 
     // PERFORMANCE: Converting back from base64 allocates another buffer
-    return Buffer.from(result.buffer, 'base64')
-  } catch (error: any) {
-    console.error('Watermark child process error:', error)
+    return Buffer.from(result.buffer!, 'base64')
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Watermark child process error:', errorMessage)
     throw error
   }
 }

@@ -1,5 +1,11 @@
-import { prismaAdmin, getPrismaForCompany } from '@docuroute/db'
+import { prismaAdmin, getPrismaForCompany, PrismaClient } from '@docuroute/db'
 import { Permission, NotificationType, SYSTEM_ROLE_PERMISSIONS } from '@docuroute/types'
+
+// Type for Prisma transaction client
+type PrismaTransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>
 
 /**
  * createNotification
@@ -22,7 +28,7 @@ export async function createNotification(
     message: string
     metadata?: object
   },
-  tx?: any
+  tx?: PrismaTransactionClient
 ): Promise<void> {
   const client = tx || prismaAdmin
 
@@ -38,9 +44,18 @@ export async function createNotification(
         isRead: false,
       },
     })
-  } catch (error) {
+  } catch (error: unknown) {
     // Never throw - notification failures should not block business operations
-    console.error('Failed to create notification:', error)
+    // Log the error for monitoring purposes
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    // In production, this should be sent to a logging service
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('[NOTIFICATION_ERROR] Failed to create notification:', {
+        userId: params.userId,
+        type: params.type,
+        error: errorMessage,
+      })
+    }
   }
 }
 
@@ -148,8 +163,16 @@ export async function createNotificationsForPermission(
     await prismaAdmin.notification.createMany({
       data: notificationData,
     })
-  } catch (error) {
+  } catch (error: unknown) {
     // Never throw - notification failures should not block business operations
-    console.error('Failed to create notifications for permission:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('[NOTIFICATION_ERROR] Failed to create notifications for permission:', {
+        companyId,
+        targetPermission,
+        userCount: users.length,
+        error: errorMessage,
+      })
+    }
   }
 }

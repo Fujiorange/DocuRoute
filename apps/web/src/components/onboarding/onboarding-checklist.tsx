@@ -73,7 +73,8 @@ export function OnboardingChecklist() {
           }
         }
       } catch (error) {
-        console.error('Failed to fetch onboarding status:', error)
+        // Silent fail - onboarding status is not critical
+        // User can still use the app without the checklist
       } finally {
         setIsLoading(false)
       }

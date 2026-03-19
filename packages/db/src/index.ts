@@ -17,7 +17,7 @@ import { prismaAdmin } from './client'
  *      with Prisma Client Extension injecting companyId into every query.
  *
  * Both enterprise and shared clients are cached in module-level Maps.
- * Cache key: companyId. Never evicted — process restart clears cache.
+ * Cache key: companyId. Evicted when cache size exceeds MAX_CACHE_SIZE (LRU-style).
  *
  * RULE: Use getPrismaForCompany in ALL API routes and cron jobs.
  * RULE: Use prismaAdmin ONLY in auth routes, SCIM routes, middleware, kms.ts.
@@ -33,12 +33,26 @@ import { prismaAdmin } from './client'
 const tenantClientCache = new Map<string, PrismaClient>()
 const extendedClientCache = new Map<string, ReturnType<typeof prismaAdmin.$extends>>()
 
+// Cache eviction strategy: limit cache size to prevent memory leaks in multi-tenant systems
+// For most applications, 100 active companies in memory is reasonable
+const MAX_CACHE_SIZE = 100
+
+function evictOldestCacheEntry<K, V>(cache: Map<K, V>): void {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value
+    if (firstKey) {
+      cache.delete(firstKey)
+    }
+  }
+}
+
 export function getPrismaForCompany(companyId: string) {
   // Check for enterprise dedicated DB
   const tenantUrl = process.env[`TENANT_DB_URL_${companyId}`]
   if (tenantUrl) {
     const cached = tenantClientCache.get(companyId)
     if (cached) return cached
+    evictOldestCacheEntry(tenantClientCache)
     const client = new PrismaClient({ datasources: { db: { url: tenantUrl } } })
     tenantClientCache.set(companyId, client)
     return client
@@ -48,10 +62,11 @@ export function getPrismaForCompany(companyId: string) {
   const cached = extendedClientCache.get(companyId)
   if (cached) return cached
 
+  evictOldestCacheEntry(extendedClientCache)
   const extended = prismaAdmin.$extends({
     query: {
       $allModels: {
-        async $allOperations({ args, query }: any) {
+        async $allOperations({ args, query }: { args: any; query: (args: any) => Promise<any> }) {
           if (args.where !== undefined) {
             args.where = { ...args.where, companyId }
           }

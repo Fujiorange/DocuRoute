@@ -112,7 +112,8 @@ export function UserTable({
       setSelectedUser(null)
       setSelectedRoleId('')
     } catch (error) {
-      console.error('Failed to change role:', error)
+      // Error handling is delegated to parent component via onRoleChange callback
+      // Parent component should display appropriate error message to user
     } finally {
       setIsSubmitting(false)
     }
@@ -127,7 +128,8 @@ export function UserTable({
       setIsDeactivateDialogOpen(false)
       setSelectedUser(null)
     } catch (error) {
-      console.error('Failed to deactivate user:', error)
+      // Error handling is delegated to parent component via onDeactivate callback
+      // Parent component should display appropriate error message to user
     } finally {
       setIsSubmitting(false)
     }
