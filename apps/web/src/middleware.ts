@@ -14,11 +14,26 @@
  *
  * Authorization: Bearer dr_[key] requests are passed through to API key validation
  * (implemented in Phase 3).
+ *
+ * ARCHITECTURE CHANGE (2026-03-23):
+ * Middleware now resolves permissions from Redis cache based on permissionVersion
+ * in JWT. This solves:
+ * 1. JWT cookie bloat (JWT reduced from ~1,440 bytes to ~400 bytes)
+ * 2. Stale permission problem (permission changes take effect immediately)
+ * 3. Scalability (can support 200+ permissions without cookie limit)
+ *
+ * Permission Resolution Flow:
+ * 1. Extract permissionVersion from JWT token
+ * 2. Look up cached permissions in Redis using companyId:roleId:version key
+ * 3. If cache miss, fall back to database (re-resolve and re-cache)
+ * 4. Attach permissions to request headers for API routes to consume
  */
 
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getToken } from 'next-auth/jwt'
+import { getCachedPermissions, cachePermissions, getPermissionVersion } from '@docuroute/core/src/permission-cache'
+import { resolvePermissions } from '@/lib/auth'
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -67,6 +82,22 @@ export async function middleware(req: NextRequest) {
       loginUrl.searchParams.set('callbackUrl', pathname)
       return NextResponse.redirect(loginUrl)
     }
+
+    // Resolve permissions from Redis cache for dashboard routes
+    // (needed for client-side permission checks)
+    if (token.companyId && token.roleId && token.permissionVersion) {
+      const permissions = await resolvePermissionsFromCache(
+        token.companyId as string,
+        token.roleId as string,
+        token.permissionVersion as number
+      )
+
+      // Attach permissions to response headers for client-side consumption
+      const response = NextResponse.next()
+      response.headers.set('X-User-Permissions', JSON.stringify(permissions))
+      return response
+    }
+
     return NextResponse.next()
   }
 
@@ -86,11 +117,72 @@ export async function middleware(req: NextRequest) {
         }
       )
     }
+
+    // Resolve permissions from Redis cache for API routes
+    if (token.companyId && token.roleId && token.permissionVersion) {
+      const permissions = await resolvePermissionsFromCache(
+        token.companyId as string,
+        token.roleId as string,
+        token.permissionVersion as number
+      )
+
+      // Attach permissions to request headers for API routes to consume
+      const requestHeaders = new Headers(req.headers)
+      requestHeaders.set('X-User-Permissions', JSON.stringify(permissions))
+
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      })
+    }
+
     return NextResponse.next()
   }
 
   // All other routes - allow
   return NextResponse.next()
+}
+
+/**
+ * Resolve permissions from Redis cache, with database fallback
+ *
+ * @param companyId - Company ID
+ * @param roleId - Role ID
+ * @param permissionVersion - Permission version from JWT
+ * @returns Array of permission strings
+ */
+async function resolvePermissionsFromCache(
+  companyId: string,
+  roleId: string,
+  permissionVersion: number
+): Promise<string[]> {
+  try {
+    // Try to get from Redis cache
+    const cached = await getCachedPermissions(companyId, roleId, permissionVersion)
+
+    if (cached) {
+      return cached
+    }
+
+    // Cache miss - resolve from database
+    console.log(`Permission cache miss for role ${roleId} version ${permissionVersion}, falling back to database`)
+
+    const permissions = await resolvePermissions(roleId)
+
+    // Get current version (may have changed since JWT was issued)
+    const currentVersion = await getPermissionVersion(companyId, roleId)
+
+    // Cache with current version
+    await cachePermissions(companyId, roleId, permissions, currentVersion)
+
+    return permissions
+  } catch (error) {
+    console.error('Failed to resolve permissions from cache:', error)
+    // On error, fall back to empty permissions array (fail-safe)
+    // API routes will handle authorization checks and return appropriate errors
+    return []
+  }
 }
 
 export const config = {

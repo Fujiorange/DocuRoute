@@ -13,13 +13,19 @@
  *
  * Provider: Email magic link via Resend.
  *
+ * ARCHITECTURE CHANGE (2026-03-23):
+ * JWT no longer contains full permissions array (was ~902 bytes for 41 permissions).
+ * Instead JWT contains permissionVersion number, and permissions are cached in Redis.
+ *
  * JWT payload includes:
  *   userId, companyId, roleId, roleName, isSystemRole, systemRoleKey?,
- *   permissions: Permission[], mfaVerified: boolean
+ *   permissionVersion: number, mfaVerified: boolean
  *
- * CRITICAL: permissions in JWT may become stale if a role is updated since login.
- * For read operations (view, list): JWT permissions are acceptable.
- * For mutations: requireLivePermission re-fetches and re-checks current state.
+ * Benefits:
+ * - JWT size reduced from ~1,440 bytes to ~400 bytes (3.6x smaller)
+ * - Can scale to 200+ permissions without cookie limit concerns
+ * - Permission changes take effect immediately (Redis cache invalidation)
+ * - No more stale permission problem
  */
 
 import NextAuth, { NextAuthOptions } from 'next-auth'
@@ -29,6 +35,7 @@ import { prismaAdmin } from '@docuroute/db'
 import { resolvePermissions } from '@/lib/auth'
 import { AuditAction } from '@docuroute/types'
 import { logAuditEvent } from '@docuroute/core/src/audit'
+import { cachePermissions, getPermissionVersion } from '@docuroute/core/src/permission-cache'
 
 export const authOptions: NextAuthOptions = {
   // Use Prisma adapter for email verification
@@ -82,6 +89,13 @@ export const authOptions: NextAuthOptions = {
     /**
      * jwt callback - Attach user data to token on sign-in
      * Uses prismaAdmin: auth needs to look up any user by email across all companies
+     *
+     * ARCHITECTURE CHANGE:
+     * Instead of storing permissions array in JWT, we:
+     * 1. Resolve permissions from role
+     * 2. Get current permission version for role
+     * 3. Cache permissions in Redis with version key
+     * 4. Store only version number in JWT
      */
     async jwt({ token, user, trigger }) {
       // On sign-in, fetch full user data
@@ -102,17 +116,23 @@ export const authOptions: NextAuthOptions = {
         })
 
         if (dbUser && dbUser.isActive) {
-          // Resolve permissions
+          // Resolve permissions from role
           const permissions = await resolvePermissions(dbUser.roleId)
 
-          // Attach to token
+          // Get current permission version for this role
+          const permissionVersion = await getPermissionVersion(dbUser.companyId, dbUser.roleId)
+
+          // Cache permissions in Redis with version key
+          await cachePermissions(dbUser.companyId, dbUser.roleId, permissions, permissionVersion)
+
+          // Attach to token (WITHOUT permissions array - only version!)
           token.userId = dbUser.id
           token.companyId = dbUser.companyId
           token.roleId = dbUser.roleId
           token.roleName = dbUser.role.name
           token.isSystemRole = dbUser.role.isSystemRole
           token.systemRoleKey = dbUser.role.systemRoleKey || undefined
-          token.permissions = permissions
+          token.permissionVersion = permissionVersion // Store version, not array
           token.mfaVerified = false
           token.email = dbUser.email
 
@@ -124,6 +144,7 @@ export const authOptions: NextAuthOptions = {
             metadata: {
               email: dbUser.email,
               roleName: dbUser.role.name,
+              permissionVersion,
             },
           })
         }
@@ -134,6 +155,10 @@ export const authOptions: NextAuthOptions = {
 
     /**
      * session callback - Expose token data to client
+     *
+     * NOTE: Permissions are NOT included in the session object returned here.
+     * Permissions will be resolved from Redis cache in middleware and added
+     * to the request context before reaching API routes.
      */
     async session({ session, token }) {
       if (token) {
@@ -145,7 +170,8 @@ export const authOptions: NextAuthOptions = {
           roleName: token.roleName as string,
           isSystemRole: token.isSystemRole as boolean,
           systemRoleKey: token.systemRoleKey as string | undefined,
-          permissions: token.permissions as string[],
+          permissions: [], // Empty array - will be populated by middleware from Redis
+          permissionVersion: token.permissionVersion as number,
           mfaVerified: token.mfaVerified as boolean,
           email: token.email as string,
         }

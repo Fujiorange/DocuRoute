@@ -7,6 +7,7 @@ import { Permission, AuditAction, AuditVaultEventType } from '@docuroute/types'
 import { validationError, notFound, forbidden } from '@docuroute/core/src/errors'
 import { logAuditEvent } from '@docuroute/core/src/audit'
 import { writeVaultEntry } from '@docuroute/core/src/audit-vault'
+import { incrementPermissionVersion } from '@docuroute/core/src/permission-cache'
 import { updatePermissionsSchema } from '@/lib/validations/role'
 
 type RouteContext = {
@@ -32,6 +33,11 @@ type RouteContext = {
  * Audit:
  * - AuditLog: CUSTOM_ROLE_UPDATED
  * - AuditVaultEntry: CUSTOM_ROLE_PERMISSION_CHANGE (action: 'UPDATED')
+ *
+ * ARCHITECTURE CHANGE (2026-03-23):
+ * After updating permissions, increments permission version in Redis cache.
+ * This invalidates all cached permissions for this role, forcing users to
+ * get fresh permissions on their next request.
  */
 export const PATCH = withApiHandler(async (req: NextRequest, context: RouteContext) => {
   const session = await getServerSession(authOptions)
@@ -102,6 +108,12 @@ export const PATCH = withApiHandler(async (req: NextRequest, context: RouteConte
     },
   })
 
+  // CRITICAL: Increment permission version to invalidate all cached permissions
+  // This ensures users with this role get fresh permissions on their next request
+  const newVersion = await incrementPermissionVersion(session.user.companyId, updatedRole.id)
+
+  console.log(`Permission version incremented to v${newVersion} for role ${updatedRole.name} (${updatedRole.id})`)
+
   // Write AuditLog
   await logAuditEvent({
     userId: session.user.id,
@@ -114,6 +126,7 @@ export const PATCH = withApiHandler(async (req: NextRequest, context: RouteConte
     permissionsUsed: [Permission.MANAGE_CUSTOM_ROLES],
     metadata: {
       roleName: updatedRole.name,
+      permissionVersion: newVersion,
       changes: {
         permissions: { from: previousPermissions, to: permissions },
       },
@@ -133,6 +146,7 @@ export const PATCH = withApiHandler(async (req: NextRequest, context: RouteConte
       action: 'UPDATED',
       roleName: updatedRole.name,
       roleId: updatedRole.id,
+      permissionVersion: newVersion,
       previousPermissions,
       newPermissions: permissions,
     },
@@ -145,6 +159,7 @@ export const PATCH = withApiHandler(async (req: NextRequest, context: RouteConte
         name: updatedRole.name,
         description: updatedRole.description,
         permissions: updatedRole.permissions,
+        permissionVersion: newVersion,
         updatedAt: updatedRole.updatedAt.toISOString(),
       },
     }),

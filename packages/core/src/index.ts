@@ -14,6 +14,7 @@ export * from './audit-vault'
 export * from './qr-verification'
 export * from './watermark'
 export * from './rate-limit'
+export * from './permission-cache'
 
 // Re-export types for convenience
 export type { Permission, SystemRoleKey, QRVerificationStatus } from '@docuroute/types'
