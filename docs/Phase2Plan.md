@@ -336,16 +336,28 @@ Shipyards already have 3D models in AVEVA Marine, Tribon, Cadmatic, or Catia. Eq
 
 ### Integration Architecture
 
-**Import Flow**:
-1. BIM system exports equipment list as JSON/CSV with fields: `tag`, `name`, `type`, `parentTag`, `coordinates`, `modelId`
+**One-Way Import Flow**:
+1. BIM system exports equipment list as CSV/JSON/XML with fields: `tag`, `name`, `type`, `parentTag`, `coordinates`, `modelId`
 2. DocuRoute API endpoint accepts bulk import with transaction rollback on error
 3. System auto-creates Equipment records with proper parent-child links
 4. System optionally creates placeholder documents for each equipment item (Installation Drawing, Datasheet, Manual)
+5. System logs import with full source file checksum for traceability
 
-**Reverse Sync (Webhook)**:
-1. When equipment tag is renamed in DocuRoute, system triggers webhook to BIM system
-2. BIM system updates tag in 3D model via REST API
-3. System logs sync status in `Equipment.bimLastSyncedAt`
+**Export for BIM Update** (manual process):
+1. User exports updated equipment list from DocuRoute as CSV/JSON
+2. User manually imports into BIM system using BIM vendor's import tools
+3. Alternative: User provides updated CSV to BIM administrator for batch update
+
+**Why Not Reverse Sync?**
+- **Reality Check (2026)**: AVEVA Marine, Tribon, Cadmatic do NOT expose public REST APIs for bidirectional sync
+- Export formats: CSV/XML/custom reports (manual or scripted)
+- Import back into AVEVA/Cadmatic: manual or via their own macro/PML/.NET API
+- Webhook → BIM system update would require customers to develop custom listeners (high friction)
+- **Mitigation**: Manual tag conflict resolution UI if re-import detects mismatches
+
+**Future Integration Path** (Phase 3 candidate):
+- If BIM vendor exposes webhook endpoints, add optional reverse sync
+- Proof-of-concept required with at least one major BIM vendor before production use
 
 ### Database Schema
 
@@ -353,25 +365,31 @@ Shipyards already have 3D models in AVEVA Marine, Tribon, Cadmatic, or Catia. Eq
 model Equipment {
   // ... existing fields from P2P1 ...
   bimModelId        String?             // External 3D model unique identifier
-  bimCoordinates    Json?               // { x, y, z } coordinates in 3D model
-  bimLastSyncedAt   DateTime?
+  bimCoordinates    Json?               // { x, y, z } coordinates in 3D model for viewer pinning
+  bimLastImportedAt DateTime?           // Last import timestamp (NOT sync—one-way only)
 }
 
-model BIMSyncLog {
-  id           String   @id @default(cuid())
-  companyId    String
-  projectId    String
-  equipmentId  String?
-  action       String   // "IMPORT" | "EXPORT" | "TAG_UPDATE"
-  status       String   // "SUCCESS" | "FAILED" | "PENDING"
-  errorMessage String?
-  metadata     Json?    // Full request/response payload
-  createdAt    DateTime @default(now())
+model BIMImportLog {
+  id               String   @id @default(cuid())
+  companyId        String
+  projectId        String
+  importSource     String   // "AVEVA_MARINE" | "TRIBON" | "CADMATIC" | "CATIA" | "CSV_UPLOAD"
+  fileName         String   // Original import file name
+  fileChecksum     String   // SHA-256 of import file for audit trail
+  recordsImported  Int      // Count of successfully imported equipment
+  recordsSkipped   Int      // Count of skipped (duplicates or validation failures)
+  recordsUpdated   Int      // Count of updated existing equipment
+  status           String   // "SUCCESS" | "PARTIAL" | "FAILED"
+  errorSummary     String?  // High-level error description
+  errorDetails     Json?    // Detailed error log per record
+  importedBy       String   // User ID who initiated import
+  createdAt        DateTime @default(now())
 
-  company      Company  @relation(fields: [companyId], references: [id])
-  project      Project  @relation(fields: [projectId], references: [id])
+  company          Company  @relation(fields: [companyId], references: [id])
+  project          Project  @relation(fields: [projectId], references: [id])
 
   @@index([projectId, createdAt])
+  @@index([companyId, createdAt])
 }
 ```
 
@@ -383,43 +401,56 @@ POST /api/projects/{id}/import-bim-equipment
 Body: {
   "source": "AVEVA_MARINE",
   "modelId": "HULL-001",
+  "updateExisting": true,  // If true, update existing equipment; if false, skip duplicates
   "equipment": [
     { "tag": "ME-01", "name": "Main Engine", "type": "ENGINE", "parentTag": null, "coordinates": { "x": 100, "y": 50, "z": 10 } },
     { "tag": "FIP-01", "name": "Fuel Injection Pump", "type": "PUMP", "parentTag": "ME-01", "coordinates": { "x": 102, "y": 52, "z": 12 } }
   ],
   "createPlaceholderDocuments": true
 }
-```
-
-**Webhook for Tag Updates** (configured in BIM system):
-```
-POST /api/webhooks/bim-sync
-Headers: X-BIM-API-Key: {configured_secret}
-Body: {
-  "event": "TAG_UPDATED",
-  "projectId": "{docuroute_project_id}",
-  "oldTag": "ME-01",
-  "newTag": "ME-01A",
-  "modelId": "HULL-001"
+Response: {
+  "importLogId": "...",
+  "recordsImported": 245,
+  "recordsUpdated": 12,
+  "recordsSkipped": 3,
+  "conflicts": [
+    { "tag": "ME-01", "issue": "Tag exists but parentTag different", "action": "skipped" }
+  ]
 }
 ```
 
-**Export Equipment to BIM**:
+**Export Equipment for BIM**:
 ```
-GET /api/projects/{id}/export-bim-equipment
-Response: JSON array of all equipment with updated tags/statuses
+GET /api/projects/{id}/export-bim-equipment?format=csv
+Response: CSV file with all equipment (tags, names, types, parent relationships, coordinates, lifecycle stages)
+
+GET /api/projects/{id}/export-bim-equipment?format=json
+Response: JSON array of all equipment with full metadata
+```
+
+**Conflict Resolution UI**:
+```
+GET /api/projects/{id}/bim-import-conflicts?importLogId={id}
+Response: List of equipment with conflicts (tag exists, different attributes)
+
+POST /api/projects/{id}/resolve-bim-conflict
+Body: {
+  "equipmentId": "...",
+  "action": "OVERWRITE" | "KEEP_EXISTING" | "MERGE"
+}
 ```
 
 ### Implementation Details
 - Transaction-wrapped bulk import with validation
-- Detect duplicate tags and prompt user for conflict resolution (skip, overwrite, rename)
+- Detect duplicate tags and present conflict resolution UI (skip, overwrite, merge)
+- CSV parser supports multiple BIM export formats (configurable column mappings)
 - Optional: Queue BIM imports as background jobs (BullMQ) for large models (>1000 equipment items)
-- Webhook authentication via API key or HMAC signature
-- Rate limiting: 10 BIM sync operations per minute per project
+- Import logs retained for 12 months for audit trail
 
 **Permissions**:
-- `BIM_IMPORT` - Import equipment from 3D models
-- `BIM_SYNC_CONFIGURE` - Configure BIM webhook endpoints
+- `BIM_IMPORT` - Import equipment from CSV/JSON exports
+- `BIM_EXPORT` - Export equipment data for BIM system update
+- `BIM_CONFLICT_RESOLVE` - Resolve import conflicts
 
 ---
 
@@ -451,11 +482,17 @@ model FieldInspection {
   documentId      String?
   inspectorUserId String
   inspectorName   String
-  inspectionType  String    // "INSTALLATION_VERIFY" | "COMMISSIONED" | "DAMAGE_REPORT" | "QUALITY_CHECK"
+  inspectionType  String    // "INSTALLATION_VERIFY" | "COMMISSIONED" | "DAMAGE_REPORT" | "QUALITY_CHECK" | "PRESSURE_TEST" | "LOOP_CHECK"
   status          String    // "PASS" | "FAIL" | "CONDITIONAL"
   notes           String?
   photoKeys       String[]  // R2 file keys for uploaded photos
   gpsCoordinates  Json?     // { lat, lon } if available
+
+  // Enhanced commissioning support
+  checklistItems  Json?     // [{ item: "Valve opens fully", result: "PASS" | "FAIL" | "NA", notes: "" }]
+  testResults     Json?     // Test-specific data (pressure readings, loop voltages, etc.)
+  witnessSignatures Json?   // [{ party: "YARD" | "VENDOR" | "CLASS" | "OWNER", name, signedAt }]
+
   timestamp       DateTime  @default(now())
 
   company         Company   @relation(fields: [companyId], references: [id])
@@ -465,6 +502,76 @@ model FieldInspection {
 
   @@index([equipmentId, timestamp])
   @@index([projectId, inspectionType])
+  @@index([status])
+}
+
+model CommissioningRecord {
+  id              String    @id @default(cuid())
+  companyId       String
+  projectId       String
+  equipmentId     String
+  recordType      String    // "PRESSURE_TEST" | "LOOP_CHECK" | "FUNCTIONAL_TEST" | "PERFORMANCE_TEST"
+  testProcedure   String?   // Reference to test procedure document
+
+  plannedDate     DateTime?
+  executedAt      DateTime?
+
+  testData        Json      // Test-specific structured data
+  verdict         String    // "PASS" | "FAIL" | "RETEST_REQUIRED"
+
+  // Multi-party witness tracking
+  yardWitness     String?
+  vendorWitness   String?
+  classWitness    String?
+  ownerWitness    String?
+
+  punchListItems  Json[]    // [{ item, severity, status, assignedTo, dueDate }]
+
+  linkedInspectionIds String[] // References to FieldInspection records (photo evidence)
+
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company         Company   @relation(fields: [companyId], references: [id])
+  project         Project   @relation(fields: [projectId], references: [id])
+  equipment       Equipment @relation(fields: [equipmentId], references: [id])
+
+  @@index([equipmentId, recordType])
+  @@index([projectId, verdict])
+}
+
+model PunchItem {
+  id              String    @id @default(cuid())
+  companyId       String
+  projectId       String
+  equipmentId     String?
+  commissioningRecordId String?
+
+  itemNumber      String    // Auto-generated: "PI-2026-001"
+  description     String
+  severity        String    // "CRITICAL" | "MAJOR" | "MINOR"
+  status          String    @default("OPEN")  // OPEN | IN_PROGRESS | RESOLVED | VERIFIED | CLOSED
+
+  raisedBy        String
+  assignedTo      String?
+  targetDate      DateTime?
+  closedAt        DateTime?
+
+  photoKeys       String[]
+  notes           String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company         Company   @relation(fields: [companyId], references: [id])
+  project         Project   @relation(fields: [projectId], references: [id])
+  equipment       Equipment? @relation(fields: [equipmentId], references: [id])
+
+  @@unique([companyId, itemNumber])
+  @@index([equipmentId, status])
+  @@index([projectId, status, severity])
+  @@index([assignedTo, status])
 }
 ```
 
@@ -533,20 +640,22 @@ Body: {
 
 ---
 
-## P2P7: Classification Society Direct Submission Portal
+## P2P7: Classification Society Assisted Submission
 
 ### Business Context
-All newbuild vessels require approval from Classification Societies (DNV, ABS, Lloyd's Register, Bureau Veritas). These organizations now provide vendor APIs for document submission. One-click submission from DocuRoute transmittals saves 2-3 days per submission cycle and eliminates manual portal uploads.
+All newbuild vessels require approval from Classification Societies (DNV, ABS, Lloyd's Register, Bureau Veritas). These organizations currently use portal-based submission systems (ABS MyFreedom, DNV Veristar, LR MOVE, BV Approval Explorer). DocuRoute generates correctly formatted submission packages with cover letters and metadata, allowing users to upload manually to society portals. This eliminates formatting errors and saves preparation time while avoiding dependencies on non-existent public APIs.
+
+**2026 Reality Check**: Classification societies do NOT provide public REST APIs for bulk document submission. Portal-based upload is the standard industry practice. Future API integrations will require bespoke per-society partnerships (6-18 month negotiation cycles).
 
 ### Supported Classification Societies
 
-| Society | API Availability | Authentication | Sandbox |
-|---------|------------------|----------------|---------|
-| DNV (Det Norske Veritas) | REST API | OAuth 2.0 | Yes |
-| ABS (American Bureau of Shipping) | REST API | API Key | Yes |
-| Lloyd's Register | REST API | OAuth 2.0 | Yes |
-| Bureau Veritas | REST API | API Key | Yes |
-| Class NK (Nippon Kaiji Kyokai) | REST API | API Key | Coming 2026 |
+| Society | Portal Upload | Package Generation | Status Tracking |
+|---------|---------------|-------------------|-----------------|
+| DNV (Det Norske Veritas) | Veristar Portal | ✓ | Manual (future API candidate) |
+| ABS (American Bureau of Shipping) | MyFreedom Client | ✓ | Manual (future API candidate) |
+| Lloyd's Register | MOVE Portal | ✓ | Manual (future API candidate) |
+| Bureau Veritas | Approval Explorer | ✓ | Manual (future API candidate) |
+| Class NK (Nippon Kaiji Kyokai) | Portal Upload | ✓ | Manual (future API candidate) |
 
 ### Database Schema
 
@@ -555,36 +664,30 @@ model ClassificationSociety {
   id             String   @id @default(cuid())
   code           String   @unique  // "DNV" | "ABS" | "LR" | "BV" | "NK"
   name           String
-  apiEndpoint    String
-  apiVersion     String
+  portalUrl      String   // URL to society's upload portal
   isActive       Boolean  @default(true)
 
   configurations ClassSocietyConfiguration[]
 }
 
 model ClassSocietyConfiguration {
-  id                  String              @id @default(cuid())
-  companyId           String
+  id                     String              @id @default(cuid())
+  companyId              String
   classificationSocietyId String
 
-  // Credentials (encrypted at rest)
-  apiKey              String?             // Encrypted with company-specific key
-  oauthClientId       String?
-  oauthClientSecret   String?             // Encrypted
-  oauthTokenUrl       String?
-
   // Submission settings
-  defaultProjectCode  String?             // Class society's project identifier
-  autoSubmitEnabled   Boolean             @default(false)
-  notificationEmails  String[]
+  defaultProjectCode     String?             // Class society's project identifier
+  vesselImoNumber        String?             // Vessel IMO number (if applicable)
+  coverSheetTemplate     String              @default("STANDARD")  // Template for cover letter generation
+  notificationEmails     String[]
 
-  isActive            Boolean             @default(true)
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  isActive               Boolean             @default(true)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
-  company             Company             @relation(fields: [companyId], references: [id])
-  classificationSociety ClassificationSociety @relation(fields: [classificationSocietyId], references: [id])
-  submissions         ClassSocietySubmission[]
+  company                Company             @relation(fields: [companyId], references: [id])
+  classificationSociety  ClassificationSociety @relation(fields: [classificationSocietyId], references: [id])
+  submissions            ClassSocietySubmission[]
 
   @@unique([companyId, classificationSocietyId])
 }
@@ -594,23 +697,25 @@ model ClassSocietySubmission {
   companyId             String
   projectId             String
   configurationId       String
-  transmittalId         String?                     // Optional: link to internal transmittal
+  transmittalId         String?                     // Link to internal transmittal for traceability
 
-  submissionCode        String                      // Class society's submission reference
   packageTitle          String
   submissionType        String                      // "APPROVAL" | "INFORMATION" | "AS_BUILT"
-  status                String                      @default("PENDING")  // PENDING | SUBMITTED | ACCEPTED | REJECTED
+  status                String                      @default("PENDING")  // PENDING | PACKAGE_READY | MANUALLY_SUBMITTED | CONFIRMED
 
   documentIds           String[]                    // Array of Document IDs included in package
-  pdfPackageKey         String?                     // R2 key for combined PDF package
-  metadataSnapshot      Json                        // Full submission payload
+  pdfPackageKey         String?                     // R2 key for generated PDF package
+  coverLetterKey        String?                     // R2 key for generated cover letter
+  metadataJsonKey       String?                     // R2 key for metadata JSON file
+  zipPackageKey         String?                     // R2 key for complete ZIP package (PDF + metadata)
 
-  submittedAt           DateTime?
-  classResponse         Json?                       // Response from class society API
-  classResponseAt       DateTime?
+  generatedAt           DateTime?                   // When package was generated
+  downloadedAt          DateTime?                   // When user downloaded package
+  manuallySubmittedAt   DateTime?                   // When user confirmed manual upload to portal
+  confirmedBy           String?                     // User who confirmed submission
 
-  errorMessage          String?
-  retryCount            Int                         @default(0)
+  notes                 String?                     // User notes about submission
+  classReferenceNumber  String?                     // Society's reference after manual submission
 
   createdAt             DateTime                    @default(now())
   updatedAt             DateTime                    @updatedAt
@@ -619,27 +724,27 @@ model ClassSocietySubmission {
   project               Project                     @relation(fields: [projectId], references: [id])
   configuration         ClassSocietyConfiguration   @relation(fields: [configurationId], references: [id])
 
-  @@unique([companyId, submissionCode])
   @@index([projectId, status])
+  @@index([companyId, createdAt])
 }
 ```
 
-### API Integration Flow
+### Package Generation Flow
 
 **1. Configuration Setup** (one-time per company per class society):
 ```
 POST /api/classification-societies/configure
 Body: {
   "classificationSocietyCode": "DNV",
-  "apiKey": "sandbox_key_12345",  // Encrypted before storage
   "defaultProjectCode": "HULL-2026-001",
-  "autoSubmitEnabled": false
+  "vesselImoNumber": "IMO1234567",
+  "coverSheetTemplate": "STANDARD"
 }
 ```
 
-**2. Submit Package to Class Society**:
+**2. Generate Submission Package**:
 ```
-POST /api/classification-societies/submit
+POST /api/classification-societies/generate-package
 Body: {
   "classificationSocietyCode": "DNV",
   "projectId": "...",
@@ -656,61 +761,96 @@ Body: {
 
 **3. System Actions**:
 - Validate all documents are approved and watermarked
-- Generate combined PDF package with cover sheet
-- Upload PDF to class society API
-- Store submission reference in `ClassSocietySubmission`
+- Generate professional cover letter (PDF) with submission metadata
+- Combine all documents into single PDF package (with bookmarks/TOC)
+- Create metadata JSON file with document codes, revisions, and checksums
+- Bundle everything into ZIP file
+- Store all files in R2 with presigned download URLs (valid 7 days)
 - Create audit vault entry
-- Send notification to document controller
+- Send notification to document controller with download link
 
-**4. Status Polling** (async job):
-- Background worker polls class society API every 30 minutes
-- Updates submission status when class responds
-- Sends email notification on acceptance/rejection
+**4. User Manual Upload**:
+- User downloads ZIP package from DocuRoute
+- User logs into classification society portal (e.g., ABS MyFreedom)
+- User uploads ZIP file via portal interface
+- Society portal sends confirmation email with reference number
+- User returns to DocuRoute and marks submission as "MANUALLY_SUBMITTED" with reference number
+- System updates status and logs submission timestamp
+
+**5. Traceability**:
+- Transmittal → ClassSocietySubmission linkage maintained
+- Full audit trail: package generation → download → manual upload → confirmation
+- If society later provides status APIs, system can poll for updates
 
 ### Implementation Details
 
-**API Adapter Pattern**:
+**Package Generator Pattern**:
 ```typescript
-interface ClassSocietyAdapter {
-  authenticate(): Promise<string>; // Returns access token
-  submitPackage(payload: SubmissionPayload): Promise<SubmissionResponse>;
-  getSubmissionStatus(submissionCode: string): Promise<StatusResponse>;
-  downloadClassComments(submissionCode: string): Promise<Buffer>;
+interface ClassSocietyPackageGenerator {
+  generateCoverLetter(submission: SubmissionMetadata): Promise<Buffer>; // Returns PDF
+  combineDocuments(documentKeys: string[]): Promise<Buffer>; // Returns merged PDF with bookmarks
+  generateMetadataJson(documents: Document[]): Promise<string>; // Returns JSON string
+  createZipPackage(files: PackageFile[]): Promise<Buffer>; // Returns ZIP bundle
 }
 
-class DNVAdapter implements ClassSocietyAdapter { /* ... */ }
-class ABSAdapter implements ClassSocietyAdapter { /* ... */ }
+class DNVPackageGenerator implements ClassSocietyPackageGenerator {
+  // DNV-specific cover letter format, file naming conventions
+}
+class ABSPackageGenerator implements ClassSocietyPackageGenerator {
+  // ABS-specific requirements (>1GB support, specific metadata fields)
+}
 ```
 
+**Cover Letter Generation**:
+- Use React-PDF or PDFKit to generate professional cover sheets
+- Include: project details, document list with codes/revisions, submission type, contact info
+- Society-specific formatting (DNV requires different layout than ABS)
+
+**Document Merging**:
+- Use `pdf-lib` to merge multiple watermarked PDFs
+- Generate bookmarks for easy navigation (one bookmark per document)
+- Add table of contents page at the beginning
+- Preserve original document metadata
+
 **Security**:
-- API keys encrypted with AES-256 using company-specific encryption key
-- OAuth tokens refreshed automatically before expiry
-- All submissions logged in AuditVaultEntry with full payload hash
-- Rate limiting: 5 submissions per hour per class society
+- All package files stored in R2 with presigned URLs (7-day expiry)
+- Download events logged in audit trail
+- Package files auto-deleted after 30 days (company can re-generate if needed)
 
 **Error Handling**:
-- Automatic retry with exponential backoff (max 3 attempts)
-- If submission fails after retries, queue for manual review
-- Document controller receives email with error details
+- If document merge fails (corrupted PDF), system identifies problematic document
+- User notified with specific document code that failed
+- Partial package not generated (all-or-nothing approach)
 
 **Permissions**:
-- `CLASS_SOCIETY_CONFIGURE` - Set up API credentials
-- `CLASS_SOCIETY_SUBMIT` - Submit packages to class society
+- `CLASS_SOCIETY_CONFIGURE` - Set up submission settings
+- `CLASS_SOCIETY_GENERATE_PACKAGE` - Generate submission packages
 - `CLASS_SOCIETY_VIEW` - View submission history
 
+**Future API Integration Path** (Phase 3 candidate):
+- When societies expose APIs, extend PackageGenerator to include `submitToAPI()` method
+- Existing assisted flow remains as fallback
+- No schema changes required—just add optional API submission alongside manual flow
+
 ### API Endpoints
-- `POST /api/classification-societies/configure` - Configure API credentials
-- `POST /api/classification-societies/submit` - Submit document package
+- `POST /api/classification-societies/configure` - Configure submission settings
+- `POST /api/classification-societies/generate-package` - Generate download package
 - `GET /api/classification-societies/submissions?projectId={id}` - List submissions
-- `GET /api/classification-societies/submissions/{id}/status` - Get submission status
-- `POST /api/classification-societies/submissions/{id}/retry` - Retry failed submission
+- `GET /api/classification-societies/submissions/{id}/download` - Get package download URLs
+- `PATCH /api/classification-societies/submissions/{id}/confirm` - Mark as manually submitted
+- `POST /api/classification-societies/submissions/{id}/regenerate` - Re-generate package
 
 ---
 
-## P2P8: Immutable Audit Ledger (Blockchain-Style Hash Chain)
+## P2P8: Immutable Audit Ledger with Optional Anchoring
 
 ### Business Context
-When shipyards hand over the as-built documentation package to vessel owners, they need cryptographic proof that no documents were altered post-delivery. This has legal value in arbitration cases and insurance claims. The existing AuditVaultEntry model (from Phase 1) provides immutability triggers, but Phase 2 extends it with SHA-256 hash chains.
+When shipyards hand over the as-built documentation package to vessel owners, they need cryptographic proof that no documents were altered post-delivery. This has legal value in arbitration cases and insurance claims. The existing AuditVaultEntry model (from Phase 1) provides immutability triggers, but Phase 2 extends it with SHA-256 hash chains and optional third-party anchoring for independent verification.
+
+**Legal Defensibility Requirements**:
+- Hash chain alone (internal system) = NOT sufficient for most arbitration/insurance claims
+- Owners and lawyers will not trust "vendor SaaS says chain is intact"
+- **Solution**: Optional anchoring to external timestamp authorities or blockchain for independent verification
 
 ### Enhanced Hash Chain Architecture
 
@@ -736,8 +876,29 @@ model AuditVaultEntry {
   chainIndex          Int      // Sequential index in the chain for this company
   documentFingerprint String?  // SHA-256 of document file (for document-related events)
 
+  // Optional external anchoring
+  anchorType          String?  // "OPENTIMESTAMPS" | "BITCOIN" | "ETHEREUM" | "IRON_MOUNTAIN" | null
+  anchorProof         String?  // Proof data from anchoring service (OTS file, tx hash, etc.)
+  anchoredAt          DateTime?
+
   @@index([companyId, chainIndex])
   @@unique([companyId, chainIndex])
+}
+
+model AuditAnchorBatch {
+  id              String   @id @default(cuid())
+  companyId       String
+  batchStartIndex Int      // First chain index in this batch
+  batchEndIndex   Int      // Last chain index in this batch
+  merkleRoot      String   // Root hash of this batch
+  anchorType      String   // "OPENTIMESTAMPS" | "BITCOIN" | "ETHEREUM" | "IRON_MOUNTAIN"
+  anchorProof     String   // Blockchain transaction hash or timestamp authority proof
+  anchoredAt      DateTime
+  verificationUrl String?  // Public URL for independent verification
+
+  company         Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, anchoredAt])
 }
 ```
 
@@ -792,6 +953,17 @@ async function verifyAuditChain(companyId: string): Promise<{ valid: boolean; br
   "projectId": "...",
   "exportedAt": "2026-03-20T10:00:00Z",
   "chainLength": 1523,
+  "anchorBatches": [
+    {
+      "merkleRoot": "d4f5c3...",
+      "anchorType": "OPENTIMESTAMPS",
+      "anchorProof": "base64_encoded_ots_file",
+      "anchoredAt": "2026-01-15T00:00:00Z",
+      "verificationUrl": "https://opentimestamps.org",
+      "batchStartIndex": 0,
+      "batchEndIndex": 999
+    }
+  ],
   "entries": [
     {
       "chainIndex": 0,
@@ -804,9 +976,45 @@ async function verifyAuditChain(companyId: string): Promise<{ valid: boolean; br
     },
     // ... all entries ...
   ],
-  "verificationInstructions": "Run SHA-256 on each entry payload and compare to 'hash' field. Verify each 'previousHash' matches previous entry's 'hash'."
+  "verificationInstructions": "1) Verify internal chain: Run SHA-256 on each entry and compare to 'hash' field. 2) Verify anchors: Use anchor proofs to verify merkle roots on blockchain/timestamp service."
 }
 ```
+
+### Anchoring Implementation
+
+**Anchoring Options**:
+
+1. **OpenTimestamps (Recommended for cost-effectiveness)**:
+   - Free Bitcoin-based timestamping service
+   - Submit merkle root of batch (e.g., daily or per 1000 entries)
+   - Returns .ots proof file for independent verification
+   - Verification: Anyone can verify timestamp using OpenTimestamps tools
+   - Cost: ~$0 (uses existing Bitcoin transactions)
+
+2. **Direct Bitcoin/Ethereum Anchoring**:
+   - Submit merkle root as OP_RETURN transaction
+   - Permanent record on public blockchain
+   - Cost: ~$5-20 per anchor (transaction fees)
+   - Best for high-value projects (LNG carriers, offshore platforms >$100M)
+
+3. **Trusted Timestamp Authority (Iron Mountain, etc.)**:
+   - Commercial long-term archiving provider
+   - Notarized timestamp certificates
+   - Legal teams familiar with this approach
+   - Cost: $50-200 per batch
+   - Best for companies requiring traditional legal proofs
+
+4. **None (Internal only)**:
+   - Hash chain verification within DocuRoute only
+   - No external proof
+   - Suitable for internal audits, not arbitration/insurance claims
+
+**Anchoring Strategy**:
+- Batch entries into merkle trees (e.g., daily or per 1000 entries)
+- Anchor merkle root to chosen service
+- Store anchor proof in `AuditAnchorBatch`
+- Individual entries link to batch via `chainIndex` range
+- Export includes both internal chain AND anchor proofs for full verification
 
 ### API Endpoints
 
@@ -982,30 +1190,189 @@ Response: { "success": true, "estimatedCompletionMinutes": 5 }
 
 ---
 
+## P2P10: Multi-Round Document Review & Conditional Approval
+
+### Business Context
+Vendor drawing review cycles in shipyards typically go through 2-4 rounds: IFR (Issued for Review) → IFA (Issued for Approval) → IFC (Issued for Construction) → AB (As-Built). Conditional approval ("Approved subject to corrections") is extremely common. The system must track review rounds, supersession chains, and conditional approval conditions.
+
+### Database Schema
+
+```prisma
+model DocumentRevision {
+  // ... existing fields from Phase 1 ...
+  reviewRound     Int       @default(1)  // 1, 2, 3, 4 (increments with each review cycle)
+  supersededById  String?   // Link to newer revision that supersedes this one
+  supersedes      DocumentRevision? @relation("RevisionSupersession", fields: [supersededById], references: [id])
+  supersededBy    DocumentRevision[] @relation("RevisionSupersession")
+
+  reviews         Review[]
+}
+
+model Review {
+  id                  String            @id @default(cuid())
+  companyId           String
+  documentId          String
+  revisionId          String
+  reviewRound         Int               // Must match DocumentRevision.reviewRound
+
+  reviewerUserId      String
+  reviewerName        String
+  reviewerRole        String?           // "ENGINEERING_MANAGER" | "QA_QC" | "PROJECT_MANAGER" | etc.
+
+  decision            String            // "APPROVED" | "APPROVED_WITH_CONDITIONS" | "REJECTED" | "REVISE_AND_RESUBMIT"
+  conditions          String?           // Required if decision = "APPROVED_WITH_CONDITIONS"
+  comments            String?
+
+  // Attachment support for review comments with markups
+  markupFileKey       String?           // R2 key for PDF with review annotations
+
+  reviewedAt          DateTime          @default(now())
+  createdAt           DateTime          @default(now())
+
+  company             Company           @relation(fields: [companyId], references: [id])
+  document            Document          @relation(fields: [documentId], references: [id])
+  revision            DocumentRevision  @relation(fields: [revisionId], references: [id])
+
+  @@index([documentId, reviewRound])
+  @@index([revisionId])
+  @@index([reviewerUserId, reviewedAt])
+  @@index([companyId, decision])
+}
+```
+
+### Key Features
+
+**Review Round Tracking**:
+- Each document revision has a `reviewRound` counter
+- When vendor resubmits after review, system creates new revision with `reviewRound + 1`
+- Supersession chain links old revision to new: `Revision-2 supersededById → Revision-1`
+- UI shows full history: "Rev B (Round 2) supersedes Rev A (Round 1)"
+
+**Conditional Approval**:
+- Reviewer selects "Approved with Conditions"
+- System requires `conditions` field (e.g., "Correct valve tag from V-101 to V-102 on sheet 3")
+- Document status becomes "CONDITIONALLY_APPROVED"
+- Vendor must acknowledge conditions before proceeding to construction
+- Acknowledgment logged in audit trail
+
+**Review Decision Types**:
+1. **APPROVED** - No changes required, proceed to next stage
+2. **APPROVED_WITH_CONDITIONS** - Minor corrections required, vendor must acknowledge
+3. **REJECTED** - Major issues, cannot proceed
+4. **REVISE_AND_RESUBMIT** - Changes required, submit new revision for next round
+
+**Markup Support**:
+- Reviewers can upload annotated PDF with review comments
+- Stored in R2 with presigned download URL
+- Linked to Review record via `markupFileKey`
+
+### API Endpoints
+
+**Submit Review**:
+```
+POST /api/documents/{id}/revisions/{revId}/review
+Body: {
+  "decision": "APPROVED_WITH_CONDITIONS",
+  "conditions": "1. Correct valve tag from V-101 to V-102 on sheet 3\n2. Update material spec to ASTM A106 Gr.B",
+  "comments": "Overall design is acceptable, minor corrections required",
+  "markupFileKey": "reviews/markup-abc123.pdf"  // Optional
+}
+```
+
+**Create New Revision After Review**:
+```
+POST /api/documents/{id}/revisions/new-round
+Body: {
+  "previousRevisionId": "...",
+  "changes": "Addressed all review comments from Round 1",
+  "fileKey": "documents/new-file.pdf"
+}
+Response: {
+  "revisionId": "...",
+  "reviewRound": 2,
+  "supersedes": "previous-revision-id"
+}
+```
+
+**Get Review History**:
+```
+GET /api/documents/{id}/review-history
+Response: [
+  {
+    "revisionNumber": "A",
+    "reviewRound": 1,
+    "reviews": [
+      { "reviewer": "John Doe", "decision": "REVISE_AND_RESUBMIT", "comments": "..." }
+    ],
+    "supersededBy": "revision-id-2"
+  },
+  {
+    "revisionNumber": "B",
+    "reviewRound": 2,
+    "reviews": [
+      { "reviewer": "John Doe", "decision": "APPROVED_WITH_CONDITIONS", "conditions": "..." }
+    ]
+  }
+]
+```
+
+**Acknowledge Conditional Approval**:
+```
+POST /api/documents/{id}/revisions/{revId}/acknowledge-conditions
+Body: {
+  "acknowledgedBy": "vendor-user-id",
+  "acknowledgementNotes": "All conditions will be addressed in fabrication"
+}
+```
+
+### Implementation Details
+
+**Permissions**:
+- `DOCUMENT_REVIEW` - Submit document reviews
+- `DOCUMENT_REVIEW_ACKNOWLEDGE` - Acknowledge conditional approval conditions
+- `DOCUMENT_REVIEW_VIEW` - View review history
+
+**UI Components**:
+- Review form with decision dropdown + conditional conditions field
+- Review history timeline showing all rounds and decisions
+- Conditional approval banner on document detail page
+- Supersession chain visualization (Rev A → Rev B → Rev C)
+
+**Validation Rules**:
+- `conditions` field required if `decision = "APPROVED_WITH_CONDITIONS"`
+- New revision `reviewRound` must be `previousRevision.reviewRound + 1`
+- Cannot delete revisions that are part of supersession chain
+- Review can only be submitted by users with `DOCUMENT_REVIEW` permission
+
+---
+
 ## Implementation Roadmap
 
 ### Phase 2A (Weeks 1-4): Core Features
-- **P2P1**: Equipment Hierarchy (database + API + basic UI)
-- **P2P3**: Project Templates (database + API + basic UI)
-- **P2P4**: Vendor Company Management (database + API + GDPR toggle)
+- **P2P1**: Equipment Hierarchy (database + API + basic UI + bimCoordinates field)
+- **P2P3**: Project Templates (database + API + sandbox mode + change proposals)
+- **P2P4**: Vendor Company Management (database + API + GDPR/PDPA toggle)
+- **P2P10**: Multi-Round Review (database + API + conditional approval)
 
 ### Phase 2B (Weeks 5-6): Field Execution
 - **P2P6**: QR Code Enhancements (equipment QR, bulk printing, field inspection API)
-- **P2P6**: PWA Offline Mode (IndexedDB caching, background sync)
+- **P2P6**: Commissioning & Punch List (CommissioningRecord + PunchItem models, witness tracking)
+- **P2P6**: PWA Offline Mode (IndexedDB caching, background sync, checklist items)
 
 ### Phase 2C (Weeks 7-8): Integrations
-- **P2P5**: BIM Integration (import API, webhook setup, sync logging)
-- **P2P7**: Classification Society Portal (adapter pattern, DNV + ABS adapters)
+- **P2P5**: BIM One-Way Import (CSV/JSON import, conflict resolution UI, export for BIM update)
+- **P2P7**: Classification Society Assisted Submission (package generation, cover letter, ZIP download)
 
 ### Phase 2D (Weeks 9-10): Compliance & Operations
-- **P2P8**: Audit Ledger Hash Chain (enhance AuditVaultEntry, verification API)
+- **P2P8**: Audit Ledger with Anchoring (hash chain, OpenTimestamps integration, export with proofs)
 - **P2P9**: Storage Quota & Archival (usage calculation, archival jobs, quota enforcement)
 
 ### Testing & Validation (Weeks 11-12)
 - Integration testing of all P2 features
 - Load testing with 10,000 equipment items + 50,000 documents
 - GDPR/PDPA compliance audit
-- Classification society sandbox testing
+- Classification society package generation testing (DNV, ABS formats)
+- Multi-round review workflow testing
 - User acceptance testing with pilot customer (Singapore shipyard)
 
 ---
@@ -1016,56 +1383,67 @@ Response: { "success": true, "estimatedCompletionMinutes": 5 }
 - Equipment hierarchy tree renders in <500ms (up to 10,000 items)
 - BIM import processes 5,000 equipment items in <60 seconds
 - QR code generation: <2 seconds for 100 codes
-- Classification society submission: <10 seconds for 50 MB package
+- Classification society package generation: <10 seconds for 50 MB (including cover letter + ZIP)
 - Audit chain verification: <5 seconds for 10,000 entries
+- Audit anchoring: <30 seconds for OpenTimestamps submission
 - Storage archival: <1 hour for 100 GB project
+- Multi-round review submission: <2 seconds
 
 ### Business Metrics
-- Reduce equipment data entry time by 90% (via BIM import)
-- Reduce classification society submission time by 80% (from 2-3 days to 4 hours)
+- Reduce equipment data entry time by 90% (via BIM one-way import)
+- Reduce classification society submission preparation time by 75% (from 4 hours to 1 hour via assisted package generation)
 - Zero GDPR/PDPA compliance violations
 - Field engineers can work 100% offline for 8-hour shifts
-- Audit chain provides legally defensible proof in arbitration cases
+- Audit chain with external anchoring provides legally defensible proof (via OpenTimestamps or timestamp authority)
+- Multi-round review tracking reduces document version confusion by 95%
+- Commissioning dossier completion time reduced by 60% (structured test records vs manual forms)
 
 ---
 
 ## Dependencies & Prerequisites
 
 ### External Services
-- **BIM System APIs**: AVEVA Marine, Tribon, Cadmatic (vendor coordination required)
-- **Classification Society APIs**: DNV, ABS, Lloyd's (sandbox access needed 2-4 weeks lead time)
+- **BIM System Exports**: AVEVA Marine, Tribon, Cadmatic (CSV/JSON export capabilities - no API required)
+- **Classification Society Portals**: DNV Veristar, ABS MyFreedom, LR MOVE, BV Approval Explorer (manual upload)
+- **OpenTimestamps**: Free Bitcoin-based timestamping (optional for audit anchoring)
 - **Cloudflare R2**: Infrequent Access storage class enabled
 
 ### Infrastructure
 - **Database**: PostgreSQL 15+ with recursive CTE support (for equipment hierarchy)
 - **Background Jobs**: BullMQ workers scaled to handle BIM imports (CPU-intensive)
-- **Encryption**: AES-256 key management for API credentials
+- **PDF Processing**: `pdf-lib` for document merging, `pdfkit` for cover letter generation
+- **Merkle Tree Library**: For audit chain batching (if using anchoring)
 
 ### Team Requirements
 - 2x Backend Engineers (Node.js/Prisma/BullMQ)
 - 1x Frontend Engineer (React/PWA/offline-first)
-- 1x Integration Engineer (API adapters for BIM/Class societies)
-- 1x QA Engineer (compliance testing)
+- 1x Integration Engineer (BIM import formats, classification society package standards)
+- 1x QA Engineer (compliance testing, multi-round review workflows)
 
 ---
 
 ## Risk Mitigation
 
 ### Technical Risks
-1. **BIM API Instability**: Vendor APIs may change without notice
-   - *Mitigation*: Adapter pattern allows quick swaps; maintain fallback CSV import
+1. **BIM Import Format Variability**: Different BIM systems export different CSV/XML schemas
+   - *Mitigation*: Configurable column mapping UI; support 3-5 common formats out-of-box; CSV template generator
 2. **Offline Sync Conflicts**: Multiple engineers editing same equipment offline
    - *Mitigation*: Last-write-wins with conflict detection UI; prompt manual merge
 3. **Storage Cost Overruns**: Cold storage costs exceed projections
    - *Mitigation*: Aggressive auto-archival after 18 months (instead of 24)
+4. **Audit Anchoring Delays**: OpenTimestamps Bitcoin confirmation can take 1-6 hours
+   - *Mitigation*: Batch anchoring (daily); immediate export still works, anchoring completes asynchronously
 
 ### Business Risks
 1. **GDPR Compliance Failure**: PII scope toggle misconfigured
    - *Mitigation*: Automated compliance tests; legal review before launch
-2. **Classification Society API Delays**: Vendor APIs not ready in time
-   - *Mitigation*: Launch P2 without P2P7; add in P2.1 update
+2. **Classification Society Manual Upload Friction**: Users resist manual portal upload step
+   - *Mitigation*: Streamline package download UX; provide clear instructions with screenshots per society
+   - *Future Path*: Move to Phase 3 when societies expose APIs (requires 6-18 month partnerships)
 3. **Customer Resistance to Archival**: Users want all data in warm tier
-   - *Mitigation*: Transparent restore process (<5 min); educate on cost savings
+   - *Mitigation*: Transparent restore process (<5 min); educate on cost savings; offer higher warm quota tiers
+4. **Multi-Round Review Adoption**: Users continue using email/spreadsheets
+   - *Mitigation*: Demonstrate time savings (version tracking, conditional approval automation); integrate with existing transmittal workflow
 
 ---
 
@@ -1076,7 +1454,10 @@ Response: { "success": true, "estimatedCompletionMinutes": 5 }
 - **P3P3**: AI-Powered Document Parsing (extract equipment tags from PDFs automatically)
 - **P3P4**: Real-Time Collaboration (simultaneous editing of equipment metadata)
 - **P3P5**: Mobile Native Apps (iOS/Android for better offline camera access)
-- **P3P6**: Blockchain Anchoring (optional: anchor audit hash chain to Ethereum for ultimate immutability)
+- **P3P6**: Classification Society Direct API Integration (when societies expose APIs - requires partnerships)
+- **P3P7**: BIM Bidirectional Sync (when BIM vendors expose webhook endpoints - requires proof-of-concept)
+- **P3P8**: 3D Viewer Integration (use bimCoordinates for equipment pinning in web-based 3D model viewer)
+- **P3P9**: Advanced Commissioning Workflows (automatic test sequence scheduling, multi-system dependencies)
 
 ---
 
@@ -1141,8 +1522,17 @@ CREATE INDEX idx_audit_vault_chain ON "AuditVaultEntry"(company_id, chain_index)
 ---
 
 **Document Control**
-Version: 1.0
+Version: 2.0 (Updated based on Singapore shipyard feedback)
 Author: DocuRoute Product Team
-Last Updated: 2026-03-20
-Status: DRAFT - Pending Stakeholder Review
-Next Review: 2026-04-01
+Last Updated: 2026-03-23
+Status: REVISED - Incorporating production feedback from pilot customer
+Next Review: 2026-04-15
+
+**Key Changes in v2.0**:
+- P2P7: Downgraded to assisted package generation (no direct API integration)
+- P2P5: Limited to one-way BIM import only (removed reverse sync)
+- P2P8: Added optional blockchain/timestamp anchoring for legal defensibility
+- P2P10: Added multi-round review with conditional approval support
+- P2P6: Enhanced with commissioning dossiers and punch list management
+- P2P1: Added bimCoordinates field for 3D viewer integration
+- Updated success metrics and risk mitigation to reflect realistic 2026 landscape
