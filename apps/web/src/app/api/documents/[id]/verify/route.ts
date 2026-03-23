@@ -3,6 +3,7 @@ import { prismaAdmin } from '@docuroute/db'
 import { buildVerificationStatus } from '@docuroute/core/src/qr-verification'
 import { logAuditEvent } from '@docuroute/core/src/audit'
 import { writeVaultEntry } from '@docuroute/core/src/audit-vault'
+import { checkRateLimit } from '@docuroute/core/src/rate-limit'
 import {
   AuditAction,
   AuditVaultEventType,
@@ -18,6 +19,8 @@ import { notFound } from '@docuroute/core/src/errors'
  * Public QR verification endpoint - no authentication required.
  * Returns document safety status for field workers.
  *
+ * Rate limited to prevent abuse: 100 verifications per hour per IP
+ *
  * Uses prismaAdmin for cross-company access (public endpoint).
  */
 
@@ -26,6 +29,14 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const documentId = params.id
+
+  // Rate limiting: 100 verifications per hour per IP (public endpoint protection)
+  const clientIP = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown'
+  await checkRateLimit({
+    key: `verify:${documentId}:${clientIP}`,
+    limit: 100,
+    windowSeconds: 3600, // 1 hour
+  })
 
   // Uses prismaAdmin: public endpoint needs cross-company access for field verification
   const document = await prismaAdmin.document.findUnique({

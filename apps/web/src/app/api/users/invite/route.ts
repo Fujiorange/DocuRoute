@@ -6,6 +6,7 @@ import { getPrismaForCompany, prismaAdmin } from '@docuroute/db'
 import { Permission, AuditAction, PLAN_LIMITS, PlanTier } from '@docuroute/types'
 import { validationError, notFound } from '@docuroute/core/src/errors'
 import { logAuditEvent } from '@docuroute/core/src/audit'
+import { checkRateLimit } from '@docuroute/core/src/rate-limit'
 import { inviteUserSchema } from '@/lib/validations/user'
 import { sendInvitationEmail } from '@/lib/email'
 import crypto from 'crypto'
@@ -16,6 +17,8 @@ import crypto from 'crypto'
  * Creates an invitation for a new user to join the company.
  *
  * Permission required: INVITE_USERS (live check)
+ *
+ * Rate limited to prevent abuse: 10 invitations per hour per user
  *
  * Body: { email: string, roleId: string, name?: string }
  *
@@ -49,6 +52,13 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     req.headers.get('x-forwarded-for') || undefined,
     req.headers.get('user-agent') || undefined
   )
+
+  // Rate limiting: 10 invitations per hour per user (prevent abuse of invitation system)
+  await checkRateLimit({
+    key: `invite:${session.user.userId}`,
+    limit: 10,
+    windowSeconds: 3600, // 1 hour
+  })
 
   // Parse and validate body
   const body = await req.json()
