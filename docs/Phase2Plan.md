@@ -141,6 +141,11 @@ model EquipmentChangeLog {
   impactedDocuments    String[] // Document IDs affected by this change
   impactedTransmittals String[] // Transmittal IDs affected
   notifiedUsers        String[] // Users who were notified
+
+  // v2.1: Link to commissioning and punch items
+  relatedCommissioningRecordId String?  // If change triggered by commissioning verdict
+  relatedPunchItemId           String?  // If change triggered by punch item closure
+
   changedBy            String
   changedAt            DateTime @default(now())
 
@@ -149,6 +154,118 @@ model EquipmentChangeLog {
   @@index([equipmentId, changedAt])
   @@index([changeType])
   @@index([changedAt])
+}
+```
+
+### Change Impact Workflow (v2.1 - Minor Polish)
+
+**Trigger: Equipment tag/lifecycle changes while document is under review**:
+```typescript
+// Enhanced change impact workflow
+async function logEquipmentChange(params: {
+  equipmentId: string;
+  changeType: string;
+  oldValue: any;
+  newValue: any;
+  relatedCommissioningRecordId?: string;
+  relatedPunchItemId?: string;
+}) {
+  // 1. Find all linked documents
+  const linkedDocs = await prisma.equipmentDocument.findMany({
+    where: { equipmentId: params.equipmentId },
+    include: { document: { include: { revisions: true } } }
+  });
+
+  // 2. Find documents currently under review
+  const docsUnderReview = linkedDocs.filter(link =>
+    link.document.revisions.some(rev => rev.status === "UNDER_REVIEW")
+  );
+
+  // 3. Find active reviewers for those documents
+  const activeReviewers = await prisma.review.findMany({
+    where: {
+      documentId: { in: docsUnderReview.map(d => d.documentId) },
+      reviewedAt: { gt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // Last 7 days
+    },
+    distinct: ['reviewerUserId']
+  });
+
+  // 4. Notify reviewers of equipment change
+  for (const reviewer of activeReviewers) {
+    await createNotification({
+      userId: reviewer.reviewerUserId,
+      companyId: params.equipmentId.companyId,
+      title: `Equipment Change Impacts Document Under Review`,
+      message: `Equipment ${params.equipmentId} changed: ${params.changeType}. Review may need update.`,
+      actionUrl: `/equipment/${params.equipmentId}`,
+    });
+  }
+
+  // 5. Create change log with reviewer notification tracking
+  await prisma.equipmentChangeLog.create({
+    data: {
+      equipmentId: params.equipmentId,
+      changeType: params.changeType,
+      oldValue: params.oldValue,
+      newValue: params.newValue,
+      impactedDocuments: docsUnderReview.map(d => d.documentId),
+      notifiedUsers: activeReviewers.map(r => r.reviewerUserId),
+      relatedCommissioningRecordId: params.relatedCommissioningRecordId,
+      relatedPunchItemId: params.relatedPunchItemId,
+      changedBy: params.changedBy,
+    }
+  });
+}
+```
+
+### Commissioning & Punch Item Integration (v2.1 - Minor Polish)
+
+**Auto-log equipment changes when commissioning verdict changes lifecycle**:
+```typescript
+// When CommissioningRecord.verdict = "PASS" → Equipment.lifecycleStage updated
+await prisma.commissioningRecord.update({
+  where: { id: commissioningId },
+  data: { verdict: "PASS" }
+});
+
+// Trigger equipment lifecycle update
+const equipment = await prisma.equipment.update({
+  where: { id: equipmentId },
+  data: {
+    lifecycleStage: "COMMISSIONED",
+    commissionedAt: new Date(),
+  }
+});
+
+// Auto-create EquipmentChangeLog entry
+await logEquipmentChange({
+  equipmentId,
+  changeType: "LIFECYCLE_UPDATED",
+  oldValue: { lifecycleStage: "INSTALLED" },
+  newValue: { lifecycleStage: "COMMISSIONED" },
+  relatedCommissioningRecordId: commissioningId,  // Link to commissioning record
+  changedBy: commissioningRecord.createdBy,
+});
+```
+
+**Auto-log when punch item closure triggers equipment status change**:
+```typescript
+// When critical PunchItem resolved → Equipment status may change
+await prisma.punchItem.update({
+  where: { id: punchItemId },
+  data: { status: "CLOSED" }
+});
+
+// If punch item was blocking commissioning
+if (punchItem.severity === "CRITICAL" && punchItem.equipmentId) {
+  await logEquipmentChange({
+    equipmentId: punchItem.equipmentId,
+    changeType: "PUNCH_ITEM_RESOLVED",
+    oldValue: { punchItemsOpen: previousCount },
+    newValue: { punchItemsOpen: previousCount - 1 },
+    relatedPunchItemId: punchItemId,  // Link to punch item
+    changedBy: punchItem.closedBy,
+  });
 }
 ```
 
@@ -263,19 +380,90 @@ model ProjectTemplate {
   category            String   // "NEWBUILD_VESSEL" | "OFFSHORE_PLATFORM" | "REFINERY_MODULE" | "CUSTOM"
   isPublic            Boolean  @default(false)  // If true, available to all companies (requires PLATFORM_ADMIN approval)
 
-  // Snapshot of project configuration
-  equipmentStructure  Json?    // Equipment hierarchy tree
-  folderStructure     Json?    // Document folder tree
-  workflowSequence    Json?    // Workflow stage definitions
-  checklistTemplate   Json?    // Document checklist items
-
   createdBy           String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   company             Company  @relation(fields: [companyId], references: [id])
 
+  // Relational structure (v2.1 - CRITICAL FIX)
+  equipmentItems      TemplateEquipment[]
+  folders             TemplateFolder[]
+  workflowStages      TemplateWorkflowStage[]
+  checklistItems      TemplateChecklistItem[]
+  projects            Project[]  // Projects created from this template
+
   @@index([companyId, category])
+}
+
+// v2.1: Relational equipment structure (replaces equipmentStructure Json)
+model TemplateEquipment {
+  id              String           @id @default(cuid())
+  templateId      String
+  tag             String           // "HVAC-FAN-001"
+  name            String
+  equipmentType   String
+  parentTag       String?          // For hierarchy (references another TemplateEquipment.tag)
+  level           Int              // Depth in hierarchy (1 = top-level)
+  sortOrder       Int              @default(0)
+
+  // Optional fields
+  manufacturer    String?
+  modelNumber     String?
+  criticalityLevel String?
+
+  template        ProjectTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, tag])
+  @@index([templateId, parentTag])
+  @@index([templateId, equipmentType])
+}
+
+// v2.1: Relational folder structure (replaces folderStructure Json)
+model TemplateFolder {
+  id              String           @id @default(cuid())
+  templateId      String
+  name            String
+  parentId        String?          // Self-referential for hierarchy
+  level           Int
+  sortOrder       Int              @default(0)
+  requiredPermissions String[]     // Permissions required to access folder
+
+  template        ProjectTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parent          TemplateFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children        TemplateFolder[] @relation("FolderHierarchy")
+
+  @@index([templateId, parentId])
+}
+
+// v2.1: Relational workflow stages (replaces workflowSequence Json)
+model TemplateWorkflowStage {
+  id                      String           @id @default(cuid())
+  templateId              String
+  stageName               String           // "IFR", "IFA", "IFC", "AS_BUILT"
+  stageOrder              Int              // 1, 2, 3, 4
+  requiredPermissions     String[]
+  autoTransitionCondition String?          // "ALL_DOCS_APPROVED" | "PM_APPROVAL" | null
+
+  template                ProjectTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, stageOrder])
+  @@index([templateId])
+}
+
+// v2.1: Relational checklist items (replaces checklistTemplate Json)
+model TemplateChecklistItem {
+  id              String           @id @default(cuid())
+  templateId      String
+  itemText        String
+  category        String           // "PRE_SUBMISSION" | "REVIEW" | "APPROVAL" | "HANDOVER"
+  sortOrder       Int              @default(0)
+  isRequired      Boolean          @default(true)
+  applicableDocTypes String[]      // ["DRAWING", "DATASHEET", "MANUAL"]
+
+  template        ProjectTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, category])
 }
 
 model Project {
@@ -311,10 +499,31 @@ model Project {
 
 ### Implementation Details
 
-**Template Serialization**:
-- Equipment structure: JSON array with `{ tag, name, type, parentTag, level }`
-- Folder structure: Nested JSON with `{ name, permissions, children[] }`
-- Workflow sequence: Array of `{ stage, requiredPermissions, autoTransitionConditions }`
+**Benefits of Relational Structure (v2.1)**:
+- **Queryable**: Find all templates containing equipment tag "HVAC-FAN-001" via `TemplateEquipment` table
+- **FKs enforce integrity**: Parent-child relationships validated at database level
+- **Proper indexing**: Fast lookups by equipmentType, parentTag, folder hierarchy
+- **No JSON parsing**: Direct SQL joins for template analysis and cloning
+- **Template inheritance**: Easy to clone and modify templates without JSON manipulation
+
+**Querying Templates**:
+```sql
+-- Find all templates that include a specific equipment type
+SELECT DISTINCT pt.* FROM ProjectTemplate pt
+JOIN TemplateEquipment te ON te.templateId = pt.id
+WHERE te.equipmentType = 'HVAC_FAN';
+
+-- Get equipment hierarchy for a template
+SELECT * FROM TemplateEquipment
+WHERE templateId = 'template-123'
+ORDER BY level, sortOrder;
+
+-- Count equipment items per template
+SELECT pt.name, COUNT(te.id) as equipmentCount
+FROM ProjectTemplate pt
+LEFT JOIN TemplateEquipment te ON te.templateId = pt.id
+GROUP BY pt.id;
+```
 
 **Application Logic**:
 - Transaction-wrapped template instantiation
@@ -402,6 +611,10 @@ model VendorSubmission {
   reviewedBy      String?
   reviewComments  String?
 
+  // Review workflow integration (v2.1 - CRITICAL FIX)
+  requiredDisciplines String[]  // ["MECHANICAL", "ELECTRICAL", "HVAC"] - triggers DisciplineReviewStatus creation
+  autoCreateReview Boolean      @default(true)  // If true, auto-create DocumentRevision + Review round on SUBMITTED
+
   metadata        Json?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -416,6 +629,117 @@ model VendorSubmission {
   @@index([projectId, status])
 }
 ```
+
+### Vendor Submission → Review Workflow Trigger (v2.1 - CRITICAL FIX)
+
+**Business Context**: When a vendor submits a package (status → SUBMITTED), the system must automatically:
+1. Create first DocumentRevision (reviewRound = 1) for each document
+2. Trigger initial review round
+3. Assign required disciplines from `VendorSubmission.requiredDisciplines`
+4. Auto-create `DisciplineReviewStatus` entries for tracking
+
+**Trigger Implementation**:
+```typescript
+// Triggered on: VendorSubmission.status = "DRAFT" → "SUBMITTED"
+async function onVendorSubmissionSubmitted(submissionId: string) {
+  const submission = await prisma.vendorSubmission.findUnique({
+    where: { id: submissionId },
+    include: { documents: true }
+  });
+
+  if (!submission.autoCreateReview) {
+    return; // Skip auto-review if disabled
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const document of submission.documents) {
+      // 1. Create first DocumentRevision (reviewRound = 1)
+      const revision = await tx.documentRevision.create({
+        data: {
+          documentId: document.id,
+          companyId: submission.companyId,
+          revisionNumber: "A",
+          reviewRound: 1,
+          status: "UNDER_REVIEW",
+          uploadedBy: submission.reviewedBy || "VENDOR",
+          fileKey: document.fileKey, // Use existing document fileKey
+          fileSize: document.fileSize,
+          sha256Hash: document.sha256Hash,
+        }
+      });
+
+      // 2. Create DisciplineReviewStatus for each required discipline
+      for (const discipline of submission.requiredDisciplines) {
+        await tx.disciplineReviewStatus.create({
+          data: {
+            companyId: submission.companyId,
+            documentId: document.id,
+            revisionId: revision.id,
+            reviewRound: 1,
+            discipline: discipline,
+            status: "PENDING",
+          }
+        });
+      }
+
+      // 3. Send notifications to discipline reviewers
+      for (const discipline of submission.requiredDisciplines) {
+        await createNotificationsForPermission({
+          companyId: submission.companyId,
+          projectId: submission.projectId,
+          permission: "DOCUMENT_REVIEW",
+          title: `Vendor Submission Ready for Review: ${submission.title}`,
+          message: `Document ${document.code} requires ${discipline} review (Round 1)`,
+          actionUrl: `/documents/${document.id}/review`,
+          tx,
+        });
+      }
+    }
+
+    // 4. Update submission status
+    await tx.vendorSubmission.update({
+      where: { id: submissionId },
+      data: {
+        status: "UNDER_REVIEW",
+        submittedAt: new Date(),
+      }
+    });
+
+    // 5. Create audit log
+    await tx.auditVaultEntry.create({
+      data: {
+        companyId: submission.companyId,
+        eventType: "VENDOR_SUBMISSION_TRIGGERED_REVIEW",
+        userId: submission.reviewedBy || "SYSTEM",
+        userEmail: "system@docuroute.com",
+        metadata: {
+          submissionId,
+          submissionCode: submission.submissionCode,
+          documentCount: submission.documents.length,
+          requiredDisciplines: submission.requiredDisciplines,
+        }
+      }
+    });
+  });
+}
+```
+
+**API Endpoint**:
+```
+PATCH /api/vendor-submissions/{id}/submit
+Body: {
+  "requiredDisciplines": ["MECHANICAL", "ELECTRICAL"],
+  "autoCreateReview": true
+}
+Response: {
+  "success": true,
+  "revisionsCreated": 5,
+  "disciplineStatusesCreated": 10,  // 5 docs × 2 disciplines
+  "notificationsSent": 8
+}
+```
+
+**Database Schema**:
 
 ### GDPR/PDPA Compliance Strategy
 
@@ -433,6 +757,7 @@ model VendorSubmission {
 - `VENDOR_MANAGE` - Create/update vendor companies
 - `VENDOR_CONTACT_MANAGE` - Add/remove vendor contacts
 - `VENDOR_SUBMISSION_REVIEW` - Review vendor submissions
+- `VENDOR_SUBMISSION_TRIGGER_REVIEW` - Submit vendor package and trigger review workflow (v2.1)
 - `VENDOR_PORTAL_ADMIN` - Configure vendor portal settings
 
 ### API Endpoints
@@ -2138,7 +2463,7 @@ CREATE INDEX idx_audit_vault_chain ON "AuditVaultEntry"(company_id, chain_index)
 Version: 2.1 (Production-Ready - All Critical Fixes Incorporated)
 Author: DocuRoute Product Team
 Last Updated: 2026-03-23
-Status: PRODUCTION-READY - Addresses all pilot-blocking issues
+Status: PRODUCTION-READY - Pilot contract ready (all blockers resolved)
 Next Review: 2026-04-30
 
 **Key Changes in v2.0**:
@@ -2157,6 +2482,14 @@ Next Review: 2026-04-30
 - P2P6: Offline conflict resolution with hybrid logical clocks
 - P2P6: Commissioning test templates with structured validation
 - P2P10: RFI (Request for Information) workflow integration
+- P2P10: Multi-discipline review consolidation
 - P2P7: Society-specific file naming templates
 - P2P9: Smart archival with access pattern tracking
 - P2P6: QR payload size optimization strategies
+
+**Final Critical Fixes** (Pilot Contract Blockers Resolved):
+- P2P3: Converted ProjectTemplate JSON blobs to relational tables (TemplateEquipment, TemplateFolder, TemplateWorkflowStage, TemplateChecklistItem)
+- P2P4: Wired VendorSubmission to P2P10 review system with auto-trigger (creates DocumentRevision + DisciplineReviewStatus on SUBMITTED)
+- P2P1: Added EquipmentChangeLog reviewer notification trigger (notifies active reviewers when equipment changes)
+- P2P6: Linked CommissioningRecord and PunchItem to EquipmentChangeLog (auto-logs lifecycle changes)
+- P2P4: Added VENDOR_SUBMISSION_TRIGGER_REVIEW permission
