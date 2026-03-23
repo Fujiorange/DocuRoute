@@ -103,11 +103,11 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     throw validationError('email', 'An active invitation already exists for this email')
   }
 
-  // Seat limit check - fetch company to get plan tier
+  // Seat limit check - fetch company to get plan tier and name (used later for email)
   // Uses prismaAdmin: need to look up Company without companyId filter
   const company = await prismaAdmin.company.findUnique({
     where: { id: session.user.companyId },
-    select: { planTier: true },
+    select: { planTier: true, name: true },
   })
 
   if (!company) {
@@ -180,19 +180,13 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     },
   })
 
-  // Get company name for email
-  const company = await prismaAdmin.company.findUnique({
-    where: { id: session.user.companyId },
-    select: { name: true },
-  })
-
-  // Send invitation email via Resend
+  // Send invitation email via Resend (company already fetched above)
   const magicLink = `${process.env.NEXTAUTH_URL}/auth/accept-invite?token=${token}`
 
   try {
     await sendInvitationEmail({
       to: email,
-      companyName: company?.name || 'DocuRoute',
+      companyName: company.name || 'DocuRoute',
       inviterName: session.user.name || session.user.email,
       roleName: role.name,
       isSystemRole: role.isSystemRole,

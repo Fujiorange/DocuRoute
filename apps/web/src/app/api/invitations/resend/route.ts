@@ -80,6 +80,9 @@ export const POST = withApiHandler(async (req: NextRequest) => {
           companyId: true,
           isSystemRole: true,
           systemRoleKey: true,
+          company: {
+            select: { name: true }
+          }
         },
       },
     },
@@ -153,19 +156,13 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     },
   })
 
-  // Get company name for email
-  const company = await prismaAdmin.company.findUnique({
-    where: { id: session.user.companyId },
-    select: { name: true },
-  })
-
-  // Send invitation email via Resend
+  // Send invitation email via Resend (company name already fetched above)
   const magicLink = `${process.env.NEXTAUTH_URL}/auth/accept-invite?token=${newToken}`
 
   try {
     await sendInvitationEmail({
       to: invitation.email,
-      companyName: company?.name || 'DocuRoute',
+      companyName: invitation.role.company.name || 'DocuRoute',
       inviterName: session.user.name || session.user.email,
       roleName: invitation.role.name,
       isSystemRole: invitation.role.isSystemRole,

@@ -121,8 +121,12 @@ export const POST = withApiHandler(async (req: Request) => {
 
   const prisma = getPrismaForCompany(session.user.companyId)
 
-  // Check if this is the first upload for onboarding
-  const existingDocumentsCount = await prisma.document.count()
+  // Check if this is the first upload for onboarding (optimized with findFirst instead of count)
+  const firstDocument = await prisma.document.findFirst({
+    where: { companyId: session.user.companyId },
+    select: { id: true }
+  })
+  const isFirstDocument = !firstDocument
 
   // Create Document
   const document = await prisma.document.create({
@@ -143,7 +147,7 @@ export const POST = withApiHandler(async (req: Request) => {
   })
 
   // Update CompanyOnboarding if this is the first upload
-  if (existingDocumentsCount === 0) {
+  if (isFirstDocument) {
     await prisma.companyOnboarding.upsert({
       where: { companyId: session.user.companyId },
       create: {
