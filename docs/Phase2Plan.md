@@ -31,6 +31,11 @@ model Equipment {
   modelNumber       String?
   serialNumber      String?
 
+  // Tag structure (for validation and querying)
+  tagPrefix         String?             // System/discipline code (e.g., "HVAC", "ME")
+  tagType           String?             // Equipment type code (e.g., "FAN", "PUMP")
+  tagNumber         Int?                // Sequential number (e.g., 001)
+
   // Hierarchy management
   parentId          String?             // Self-referential FK for tree structure
   level             Int                 // COMPUTED COLUMN - derived from parent chain
@@ -40,9 +45,16 @@ model Equipment {
   commissionedAt    DateTime?
   decommissionedAt  DateTime?
 
+  // Additional tracking fields (v2.1)
+  criticalityLevel  String?             // "CRITICAL" | "ESSENTIAL" | "IMPORTANT" | "STANDARD"
+  maintenanceType   String?             // "PREVENTIVE" | "CORRECTIVE" | "PREDICTIVE" | "RUN_TO_FAILURE"
+  location          String?             // Physical location description
+  primaryDrawingId  String?             // FK to primary installation drawing
+
   // Integration fields
   bimModelId        String?             // External 3D model reference (AVEVA/Tribon/Catia)
-  bimLastSyncedAt   DateTime?
+  bimCoordinates    Json?               // { x, y, z } coordinates in 3D model for viewer pinning
+  bimLastImportedAt DateTime?           // Last import timestamp (NOT sync—one-way only)
 
   metadata          Json?               // Flexible field for custom attributes
   createdAt         DateTime            @default(now())
@@ -53,29 +65,90 @@ model Equipment {
   parent            Equipment?          @relation("EquipmentHierarchy", fields: [parentId], references: [id])
   children          Equipment[]         @relation("EquipmentHierarchy")
   documentMappings  EquipmentDocument[]
+  primaryDrawing    Document?           @relation("PrimaryDrawing", fields: [primaryDrawingId], references: [id])
+  changeLogs        EquipmentChangeLog[]
 
   @@unique([projectId, tag])
   @@index([companyId, projectId])
   @@index([parentId])
   @@index([lifecycleStage])
+  @@index([criticalityLevel])
+  @@index([maintenanceType])
+  @@index([tagPrefix, tagType])
+}
+
+model EquipmentTagFormat {
+  id              String   @id @default(cuid())
+  companyId       String
+  name            String   // "Standard Format", "HVAC Format", etc.
+  pattern         String   // Regex pattern (e.g., "^[A-Z]{2,4}-[A-Z]{2,6}-\d{3}$")
+  example         String   // "HVAC-FAN-001"
+  description     String?
+  maxLength       Int      @default(20)
+  allowedChars    String   @default("A-Z0-9-")  // Regex character class
+  isDefault       Boolean  @default(false)
+
+  // Tag structure rules
+  prefixRequired  Boolean  @default(true)
+  prefixOptions   String[] // Reserved prefixes by discipline
+  typeRequired    Boolean  @default(true)
+  numberRequired  Boolean  @default(true)
+  numberPadding   Int      @default(3)  // Zero-pad to 3 digits
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company         Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, isDefault])
 }
 ```
 
 #### Equipment-Document Mapping
 ```prisma
 model EquipmentDocument {
-  id           String    @id @default(cuid())
-  equipmentId  String
-  documentId   String
-  relationship String    // DocumentRelationship enum (INSTALLATION_DRAWING, DATASHEET, MANUAL, etc.)
-  isPrimary    Boolean   @default(false)
-  createdAt    DateTime  @default(now())
+  id            String    @id @default(cuid())
+  equipmentId   String
+  documentId    String
+  relationship  String    // DocumentRelationship enum (INSTALLATION_DRAWING, DATASHEET, MANUAL, etc.)
+  isPrimary     Boolean   @default(false)
 
-  equipment    Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
-  document     Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  // Link lifecycle and revision tracking (v2.1)
+  validFrom     DateTime? // When this link became active
+  validUntil    DateTime? // When equipment decommissioned or link superseded
+  revisionId    String?   // Link to specific document revision
+  autoUpdateRev Boolean   @default(true)  // Follow latest revision automatically
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  equipment     Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  document      Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  revision      DocumentRevision? @relation(fields: [revisionId], references: [id])
 
   @@unique([equipmentId, documentId, relationship])
   @@index([documentId])
+  @@index([revisionId])
+  @@index([validFrom, validUntil])
+}
+
+model EquipmentChangeLog {
+  id                   String   @id @default(cuid())
+  equipmentId          String
+  changeType           String   // "TAG_CHANGED" | "LIFECYCLE_UPDATED" | "DELETED" | "PARENT_CHANGED" | "DECOMMISSIONED"
+  oldValue             Json?
+  newValue             Json?
+  impactedDocuments    String[] // Document IDs affected by this change
+  impactedTransmittals String[] // Transmittal IDs affected
+  notifiedUsers        String[] // Users who were notified
+  changedBy            String
+  changedAt            DateTime @default(now())
+
+  equipment            Equipment @relation(fields: [equipmentId], references: [id])
+
+  @@index([equipmentId, changedAt])
+  @@index([changeType])
+  @@index([changedAt])
 }
 ```
 
@@ -107,21 +180,64 @@ model EquipmentDocument {
 - Maximum depth limit (typically 10 levels)
 - Cascade lifecycle stage updates to children (e.g., parent COMMISSIONED → children INSTALLED)
 
+**Equipment Tag Validation** (v2.1 Critical Fix):
+- Company-specific tag format validation using `EquipmentTagFormat` rules
+- Validation on:
+  - Manual entry (immediate feedback)
+  - BIM import (pre-validation with error report)
+  - Bulk operations (transaction rollback on first invalid tag)
+- Tag structure parsing:
+  - Extract `tagPrefix`, `tagType`, `tagNumber` from tag string
+  - Store structured components for fast querying
+  - Example: "HVAC-FAN-001" → prefix="HVAC", type="FAN", number=1
+
+**Tag Generator**:
+```typescript
+interface TagGeneratorConfig {
+  prefix: string;      // "HVAC"
+  type: string;        // "FAN"
+  startNumber?: number; // Default: 1
+  padding?: number;    // Default: 3 (zero-pad)
+}
+
+// Generates: HVAC-FAN-001, HVAC-FAN-002, etc.
+// Auto-increments based on existing tags in project
+```
+
+**Change Impact Tracking** (v2.1):
+- When equipment tag changes:
+  - Find all linked documents via `EquipmentDocument`
+  - Create `EquipmentChangeLog` entry
+  - Notify document owners + transmittal creators
+  - Flag affected transmittals for review
+- When equipment decommissioned:
+  - Set `EquipmentDocument.validUntil = now()`
+  - Update `Equipment.decommissionedAt`
+  - Auto-update linked `CommissioningRecord` if exists
+- Cascade rules configurable per company
+
 **Permissions**:
 - `EQUIPMENT_CREATE` - Create equipment records
 - `EQUIPMENT_UPDATE` - Modify equipment details
 - `EQUIPMENT_DELETE` - Remove equipment (only if no children or documents)
 - `EQUIPMENT_VIEW` - Read equipment hierarchy
+- `EQUIPMENT_TAG_FORMAT_MANAGE` - Configure tag validation rules
 
 ### API Endpoints
-- `POST /api/equipment` - Create equipment item
+- `POST /api/equipment` - Create equipment item (with tag validation)
 - `GET /api/equipment?projectId={id}` - List equipment with hierarchy (nested JSON or flat with level)
 - `GET /api/equipment/{id}` - Get equipment details with document mappings
 - `PATCH /api/equipment/{id}` - Update equipment
 - `DELETE /api/equipment/{id}` - Delete equipment (if allowed)
 - `POST /api/equipment/{id}/documents` - Link document to equipment
+- `POST /api/equipment/bulk-link` - Bulk link one document to multiple equipment (v2.1)
 - `GET /api/equipment/{id}/tree` - Get full ancestor/descendant tree
-- `PATCH /api/equipment/{id}/lifecycle` - Update lifecycle stage
+- `PATCH /api/equipment/{id}/lifecycle` - Update lifecycle stage (triggers auto-updates)
+- `GET /api/equipment/tag-formats` - List company tag format rules
+- `POST /api/equipment/tag-formats` - Create tag format rule
+- `POST /api/equipment/validate-tag` - Validate tag against company rules (returns structured components)
+- `POST /api/equipment/generate-tag` - Generate next available tag for given prefix/type
+- `GET /api/equipment/{id}/change-log` - Get equipment change history with impact analysis
 
 ### UI Components
 - Equipment tree navigator with drag-and-drop reordering
@@ -336,12 +452,63 @@ Shipyards already have 3D models in AVEVA Marine, Tribon, Cadmatic, or Catia. Eq
 
 ### Integration Architecture
 
-**One-Way Import Flow**:
+**One-Way Import Flow with Tag Normalization** (v2.1 Critical Fix):
 1. BIM system exports equipment list as CSV/JSON/XML with fields: `tag`, `name`, `type`, `parentTag`, `coordinates`, `modelId`
-2. DocuRoute API endpoint accepts bulk import with transaction rollback on error
-3. System auto-creates Equipment records with proper parent-child links
-4. System optionally creates placeholder documents for each equipment item (Installation Drawing, Datasheet, Manual)
-5. System logs import with full source file checksum for traceability
+2. **Tag Normalization Engine** processes raw tags before validation:
+   - Apply company-configured normalization rules
+   - Extract clean tags from messy formats (paths, brackets, suffixes)
+   - Show before/after preview for user approval
+3. DocuRoute validates normalized tags against company `EquipmentTagFormat` rules
+4. System auto-creates Equipment records with proper parent-child links (transaction-wrapped)
+5. System optionally creates placeholder documents for each equipment item (Installation Drawing, Datasheet, Manual)
+6. System logs import with full source file checksum + normalization report for audit trail
+
+**Tag Normalization Rules** (v2.1):
+```typescript
+interface TagNormalizationRule {
+  id: string;
+  companyId: string;
+  name: string;  // "AVEVA Marine Path Extractor", "Bracket Tag Extractor"
+  bimSystem: string;  // "AVEVA_MARINE" | "TRIBON" | "CADMATIC" | "CATIA" | "CUSTOM"
+  priority: number;  // Rules applied in order (1 = first)
+
+  pattern: RegExp;  // Extraction pattern
+  extract: string;  // Capture group reference (e.g., "$1")
+  transform?: string; // Optional: "UPPERCASE" | "ADD_DASHES" | "REMOVE_UNDERSCORES"
+
+  isActive: boolean;
+  examples: Array<{ input: string; output: string }>;
+}
+
+// Example rules:
+const bracketExtractor: TagNormalizationRule = {
+  name: "Extract Tag from Brackets",
+  pattern: /\[([A-Z0-9-]+)\]/,
+  extract: "$1",
+  // "Main Engine [ME-01]" → "ME-01"
+};
+
+const pathExtractor: TagNormalizationRule = {
+  name: "Extract from AVEVA Path",
+  pattern: /\/Equipment\/[^/]+\/[^/]+\/([A-Z0-9-]+)$/,
+  extract: "$1",
+  // "/Equipment/Hull1/EngineRoom/ME-01" → "ME-01"
+};
+
+const underscoreToDash: TagNormalizationRule = {
+  name: "Convert Underscores to Dashes",
+  pattern: /([A-Z0-9]+)_([A-Z0-9]+)_(\d+)/,
+  extract: "$1-$2-$3",
+  // "ME_01_REV_B" → "ME-01-REV" (then strip suffix with next rule)
+};
+
+const stripRevisionSuffix: TagNormalizationRule = {
+  name: "Strip Revision Suffix",
+  pattern: /^([A-Z0-9-]+)[-_](REV|R|V)[-_]?[A-Z0-9]*$/,
+  extract: "$1",
+  // "ME-01-REV-B" → "ME-01"
+};
+```
 
 **Export for BIM Update** (manual process):
 1. User exports updated equipment list from DocuRoute as CSV/JSON
@@ -360,6 +527,31 @@ Shipyards already have 3D models in AVEVA Marine, Tribon, Cadmatic, or Catia. Eq
 - Proof-of-concept required with at least one major BIM vendor before production use
 
 ### Database Schema
+
+```prisma
+model BIMTagNormalizationRule {
+  id              String   @id @default(cuid())
+  companyId       String
+  name            String
+  bimSystem       String   // "AVEVA_MARINE" | "TRIBON" | "CADMATIC" | "CATIA" | "CUSTOM"
+  priority        Int      // Rules applied in order (1 = highest)
+
+  patternRegex    String   // Regex pattern as string
+  extractTemplate String   // "$1", "$1-$2-$3", etc.
+  transformType   String?  // "UPPERCASE" | "ADD_DASHES" | "REMOVE_UNDERSCORES" | null
+
+  isActive        Boolean  @default(true)
+  examples        Json     // [{ input: "...", output: "..." }]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company         Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, bimSystem, priority])
+  @@index([companyId, isActive])
+}
+```
 
 ```prisma
 model Equipment {
@@ -626,6 +818,211 @@ Body: {
 }
 ```
 
+### Offline Conflict Resolution (v2.1)
+
+**Business Context**: Multiple field engineers may edit the same equipment or commissioning record while offline. When they sync, conflicts must be detected and resolved.
+
+**Hybrid Logical Clock Implementation**:
+```typescript
+interface OfflineEdit {
+  id: string;
+  entityType: "EQUIPMENT" | "COMMISSIONING_RECORD" | "PUNCH_ITEM" | "FIELD_INSPECTION";
+  entityId: string;
+  field: string;          // Field that was edited (e.g., "lifecycleStage", "verdict")
+  oldValue: any;
+  newValue: any;
+
+  // Conflict detection
+  deviceId: string;       // Unique device identifier
+  lamportTimestamp: number;  // Logical clock counter
+  physicalTimestamp: Date;   // Wall clock time
+  userId: string;
+
+  // Resolved in sync process
+  conflictsWith?: string[];  // Array of conflicting edit IDs
+  resolvedBy?: "AUTO_MERGE" | "LAST_WRITE_WINS" | "MANUAL";
+  resolvedAt?: Date;
+}
+```
+
+**Conflict Detection Rules**:
+1. **Same Entity + Same Field + Different Devices = Conflict**
+   - Example: Device A sets `Equipment.lifecycleStage = "COMMISSIONED"`, Device B sets it to `"INSTALLED"` while both offline
+2. **Lamport Timestamp Ordering**: Each device maintains a counter that increments with each edit
+3. **Auto-Resolution Strategy**:
+   - For non-critical fields (notes, photoKeys): **Merge** (combine values)
+   - For critical fields (lifecycleStage, verdict): **Last Physical Timestamp Wins** + flag for manual review
+
+**Conflict UI Flow**:
+1. User syncs offline edits → system detects conflict
+2. UI shows conflict resolution screen:
+   ```
+   CONFLICT DETECTED: Equipment HVAC-FAN-001 - lifecycleStage
+
+   Your change (Device: Tablet-A, Time: 10:30 AM):
+   "INSTALLED" → "COMMISSIONED"
+
+   Conflicting change (Device: Tablet-B, Time: 10:35 AM, User: John):
+   "INSTALLED" → "TESTED"
+
+   [Keep Mine] [Keep Theirs] [Manual Override]
+   ```
+3. User selects resolution → system applies and logs decision
+
+**Database Schema Addition**:
+```prisma
+model OfflineEditLog {
+  id                  String   @id @default(cuid())
+  companyId           String
+  deviceId            String
+  entityType          String
+  entityId            String
+  field               String
+  oldValue            Json?
+  newValue            Json?
+
+  lamportTimestamp    Int
+  physicalTimestamp   DateTime
+  userId              String
+
+  conflictsWith       String[] // Edit IDs that conflict
+  resolvedBy          String?  // "AUTO_MERGE" | "LAST_WRITE_WINS" | "MANUAL"
+  resolvedAt          DateTime?
+  resolvedByUserId    String?
+
+  createdAt           DateTime @default(now())
+  company             Company  @relation(fields: [companyId], references: [id])
+
+  @@index([entityType, entityId, field])
+  @@index([deviceId, lamportTimestamp])
+  @@index([companyId, createdAt])
+}
+```
+
+**API Endpoints**:
+- `POST /api/offline-sync/submit` - Submit offline edits with conflict detection
+- `GET /api/offline-sync/conflicts` - Get unresolved conflicts for user
+- `POST /api/offline-sync/resolve-conflict` - Manually resolve conflict
+
+### Commissioning Test Templates (v2.1)
+
+**Business Context**: Different equipment types require different test procedures (pumps need flow tests, valves need pressure tests, control panels need loop checks). Templates ensure consistency across all commissioning records.
+
+**Database Schema**:
+```prisma
+model CommissioningTemplate {
+  id              String   @id @default(cuid())
+  companyId       String
+  equipmentType   String   // "PUMP" | "VALVE" | "CONTROL_PANEL" | "HVAC_FAN" | "HEAT_EXCHANGER"
+  templateName    String   // "Main Circulation Pump Test", "Gate Valve Pressure Test"
+
+  // Test procedure structure
+  testSteps       Json     // [{ step: 1, action: "Isolate pump suction/discharge", expectedResult: "Valves closed", criteria: "Visual check" }]
+  dataFields      Json     // [{ field: "inletPressure", unit: "bar", range: { min: 0, max: 10 }, required: true }]
+
+  // Witness requirements
+  requireYardWitness    Boolean @default(true)
+  requireVendorWitness  Boolean @default(false)
+  requireClassWitness   Boolean @default(false)
+  requireOwnerWitness   Boolean @default(false)
+
+  // Safety and prerequisites
+  prerequisites   String[] // ["Lock-Out Tag-Out", "Confined Space Permit", "Hot Work Permit"]
+  safetyChecks    String[] // ["Fire extinguisher nearby", "Emergency stop tested"]
+
+  isActive        Boolean  @default(true)
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  company         Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, equipmentType, isActive])
+}
+```
+
+**Template Usage Flow**:
+1. **Create Commissioning Record**: User selects equipment → system looks up `Equipment.equipmentType` → loads matching `CommissioningTemplate`
+2. **Pre-fill Test Form**: Template's `testSteps` and `dataFields` populate the commissioning record UI
+3. **Execute Test**: Field engineer follows step-by-step checklist, enters measured data
+4. **Automatic Pass/Fail**: System validates data against `range` criteria, auto-sets verdict
+5. **Link to Equipment Lifecycle**: On "PASS", system auto-updates `Equipment.lifecycleStage` to next stage
+
+**Example Template (Pump Commissioning)**:
+```json
+{
+  "equipmentType": "PUMP",
+  "templateName": "Centrifugal Pump Commissioning Test",
+  "testSteps": [
+    { "step": 1, "action": "Verify pump rotation direction", "expectedResult": "Clockwise when viewed from motor", "criteria": "Visual + bump test" },
+    { "step": 2, "action": "Check suction strainer clean", "expectedResult": "No debris", "criteria": "Visual inspection" },
+    { "step": 3, "action": "Open discharge valve slowly", "expectedResult": "Pressure rises smoothly", "criteria": "Pressure gauge reading" },
+    { "step": 4, "action": "Run at rated flow for 30 minutes", "expectedResult": "No vibration, temperature stable", "criteria": "Vibration <0.5mm/s, Temp <70°C" }
+  ],
+  "dataFields": [
+    { "field": "dischargePressure", "unit": "bar", "range": { "min": 5, "max": 8 }, "required": true },
+    { "field": "flowRate", "unit": "m³/h", "range": { "min": 45, "max": 55 }, "required": true },
+    { "field": "motorCurrent", "unit": "A", "range": { "min": 10, "max": 15 }, "required": true }
+  ],
+  "requireYardWitness": true,
+  "requireClassWitness": true
+}
+```
+
+**API Endpoints**:
+- `GET /api/commissioning-templates?equipmentType={type}` - Get templates for equipment type
+- `POST /api/commissioning-templates` - Create new template
+- `GET /api/commissioning-records/start?equipmentId={id}` - Start commissioning (loads template)
+
+**Auto-Link to Equipment Lifecycle**:
+- When `CommissioningRecord.verdict = "PASS"` AND `CommissioningRecord.recordType = "FUNCTIONAL_TEST"`:
+  - Auto-update `Equipment.lifecycleStage = "COMMISSIONED"`
+  - Auto-update `Equipment.commissionedAt = now()`
+  - Create `EquipmentChangeLog` entry
+
+### QR Code Payload Size Optimization (v2.1)
+
+**Problem**: Standard QR codes max out at ~3KB for reliable scanning. Full equipment metadata exceeds this.
+
+**Solution Strategy**:
+| Approach | QR Capacity | Data Included | Use Case |
+|----------|-------------|---------------|----------|
+| **Reference-Only** (Default) | 50 bytes | `https://docuroute.com/e/{shortId}` | Online + offline with pre-cached data |
+| **Minimal Offline** | 300 bytes | Tag + name + lifecycleStage + lastSync | Offline-first environments |
+| **Data Matrix 2D** | 10 KB | Full equipment + linked docs metadata | Zero-connectivity zones (dry docks) |
+
+**Implementation**:
+```typescript
+interface QRPayloadConfig {
+  mode: "REFERENCE_ONLY" | "MINIMAL_OFFLINE" | "DATA_MATRIX";
+  includeLinkedDocs?: boolean;  // For DATA_MATRIX mode only
+  compressMetadata?: boolean;   // Use gzip for DATA_MATRIX
+}
+
+// Example payloads
+const referenceOnly = "https://docuroute.com/e/x7K9mP";  // 33 bytes
+
+const minimalOffline = {
+  t: "HVAC-FAN-001",  // tag
+  n: "Supply Fan A",  // name
+  l: "COMMISSIONED",  // lifecycleStage
+  s: 1711045200      // lastSyncTimestamp (epoch)
+};  // ~80 bytes JSON
+
+const dataMatrix = {
+  /* Full equipment object + linked documents array */
+};  // 5-10 KB, requires Data Matrix code
+```
+
+**API Endpoint**:
+```
+GET /api/equipment/{id}/qr-code?mode=MINIMAL_OFFLINE&format=png&size=256
+```
+
+**PWA Caching Strategy**:
+- On sync, download and cache all equipment metadata in IndexedDB
+- QR scan extracts `shortId` → lookup in local cache → instant display
+- If not in cache, show "Sync required" message
+
 ### Implementation Details
 - QR codes generated with `qrcode` npm package (already installed)
 - Encrypted payload uses AES-256 with company-specific key (prevents QR code forgery)
@@ -680,6 +1077,10 @@ model ClassSocietyConfiguration {
   vesselImoNumber        String?             // Vessel IMO number (if applicable)
   coverSheetTemplate     String              @default("STANDARD")  // Template for cover letter generation
   notificationEmails     String[]
+
+  // Society-specific file naming (v2.1)
+  fileNamingTemplate     String?             // "{vesselCode}_{docCode}_{rev}_{date}.pdf"
+  fileNamingVariables    Json?               // { vesselCode: "PE2026", dateFormat: "YYYYMMDD" }
 
   isActive               Boolean             @default(true)
   createdAt              DateTime            @default(now())
@@ -805,6 +1206,58 @@ class ABSPackageGenerator implements ClassSocietyPackageGenerator {
 - Use React-PDF or PDFKit to generate professional cover sheets
 - Include: project details, document list with codes/revisions, submission type, contact info
 - Society-specific formatting (DNV requires different layout than ABS)
+
+**Society-Specific File Naming Templates (v2.1)**:
+
+Each classification society has unique file naming requirements. Examples:
+
+| Society | Template Pattern | Example Output |
+|---------|-----------------|----------------|
+| DNV | `{vesselCode}-{docType}-{docNumber}-R{rev}.pdf` | `PE2026-DWG-H1001-R02.pdf` |
+| ABS | `{imoNumber}_{docCode}_{date}.pdf` | `IMO1234567_ME-001_20260320.pdf` |
+| Lloyd's Register | `{projectCode}_{discipline}_{docCode}_Rev{rev}.pdf` | `HULL2026_ME_ME-001_RevB.pdf` |
+| Bureau Veritas | `{vesselName}_{docCode}_{rev}_{submissionType}.pdf` | `PacificExplorer_ME-001_02_APPROVAL.pdf` |
+
+**File Naming Configuration**:
+```typescript
+interface FileNamingTemplate {
+  societyCode: string;
+  template: string;       // "{vesselCode}-{docType}-{docNumber}-R{rev}.pdf"
+  variables: {
+    vesselCode?: string;  // "PE2026"
+    imoNumber?: string;   // "IMO1234567"
+    projectCode?: string; // "HULL2026"
+    vesselName?: string;  // "PacificExplorer"
+    dateFormat?: string;  // "YYYYMMDD" | "YYYY-MM-DD" | "DDMMMYY"
+  };
+}
+
+// Example: DNV file naming
+const dnvNaming: FileNamingTemplate = {
+  societyCode: "DNV",
+  template: "{vesselCode}-{docType}-{docNumber}-R{rev}.pdf",
+  variables: {
+    vesselCode: "PE2026",
+    dateFormat: "YYYYMMDD"
+  }
+};
+
+function generateFileName(doc: Document, template: FileNamingTemplate): string {
+  const parts = doc.code.split('-');  // "ME-001" → ["ME", "001"]
+
+  return template.template
+    .replace('{vesselCode}', template.variables.vesselCode || '')
+    .replace('{docType}', parts[0])       // "ME"
+    .replace('{docNumber}', parts[1])     // "001"
+    .replace('{rev}', doc.revision)
+    .replace('{date}', formatDate(new Date(), template.variables.dateFormat));
+}
+```
+
+**Configuration UI**:
+- Company admin configures naming template once per society
+- System validates template syntax on save
+- Preview shows 3 example filenames before confirming
 
 **Document Merging**:
 - Use `pdf-lib` to merge multiple watermarked PDFs
@@ -1077,6 +1530,29 @@ model Project {
   archivedAt            DateTime?
   lastAccessedAt        DateTime  @default(now())
   storageUsedGB         Float     @default(0)
+
+  // Access pattern tracking (v2.1)
+  accessCount7Days      Int       @default(0)   // Number of document accesses in last 7 days
+  accessCount30Days     Int       @default(0)   // Number of document accesses in last 30 days
+  isPinned              Boolean   @default(false)  // User-pinned to prevent auto-archival
+}
+
+model DocumentAccessLog {
+  id              String   @id @default(cuid())
+  companyId       String
+  projectId       String
+  documentId      String
+  userId          String
+  accessType      String   // "VIEW" | "DOWNLOAD" | "RESTORE_FROM_COLD"
+  timestamp       DateTime @default(now())
+
+  company         Company  @relation(fields: [companyId], references: [id])
+  project         Project  @relation(fields: [projectId], references: [id])
+  document        Document @relation(fields: [documentId], references: [id])
+
+  @@index([projectId, timestamp])
+  @@index([documentId, timestamp])
+  @@index([companyId, timestamp])
 }
 
 model StorageQuotaLog {
@@ -1102,6 +1578,36 @@ model StorageQuotaLog {
 - System sends email notification to COMPANY_OWNER 30 days before archival
 - If no objection, project moves to COLD tier automatically
 - Archived projects remain fully searchable (metadata stays in warm database)
+
+**Smart Archival Recommendations (v2.1)**:
+- Background job analyzes `DocumentAccessLog` to identify inactive projects
+- **Smart criteria** for archival suggestion:
+  - `accessCount30Days = 0` AND `lastAccessedAt > 12 months`
+  - OR `accessCount7Days < 5` AND `lastAccessedAt > 18 months`
+- Weekly email digest to COMPANY_ADMIN with archival recommendations:
+  ```
+  📊 Storage Optimization Report - Week of March 20, 2026
+
+  Your warm storage: 4.8 TB / 5.0 TB (96% used)
+
+  Projects recommended for archival (save 1.2 TB):
+  - [Vessel A - 2023 Newbuild] - 456 GB, last accessed 19 months ago, 0 views in 30 days
+  - [Vessel B - 2024 Refit] - 678 GB, last accessed 14 months ago, 2 views in 30 days
+
+  User-pinned projects (will not auto-archive):
+  - [Vessel C - Reference Design] - 234 GB, pinned by John Doe
+
+  [Review Recommendations] [Archive All] [Snooze 30 Days]
+  ```
+
+**User Pinning**:
+- Users can pin projects to prevent auto-archival
+- Use case: Reference designs, standard templates, frequently consulted projects
+- Pinned projects show 📌 badge in project list
+
+**Auto-Restore for Frequently Accessed Archived Projects**:
+- If archived project receives >10 document accesses in 7 days → system suggests restore
+- Modal prompt: "This project has been accessed 15 times this week. Restore to warm storage for faster access?"
 
 **Manual Archival**:
 - COMPANY_ADMIN can manually archive any project
@@ -1218,10 +1724,17 @@ model Review {
   reviewerUserId      String
   reviewerName        String
   reviewerRole        String?           // "ENGINEERING_MANAGER" | "QA_QC" | "PROJECT_MANAGER" | etc.
+  discipline          String?           // "MECHANICAL" | "ELECTRICAL" | "STRUCTURAL" | "HVAC" | etc. (v2.1)
 
-  decision            String            // "APPROVED" | "APPROVED_WITH_CONDITIONS" | "REJECTED" | "REVISE_AND_RESUBMIT"
+  decision            String            // "APPROVED" | "APPROVED_WITH_CONDITIONS" | "REJECTED" | "REVISE_AND_RESUBMIT" | "RFI_REQUIRED"
   conditions          String?           // Required if decision = "APPROVED_WITH_CONDITIONS"
   comments            String?
+
+  // RFI Integration (v2.1)
+  requiresRfi         Boolean           @default(false)  // True if reviewer raises RFI
+  rfiReference        String?           // Link to external RFI system or internal RFI ID
+  rfiResolvedAt       DateTime?         // When RFI was resolved
+  rfiResolution       String?           // Summary of RFI resolution
 
   // Attachment support for review comments with markups
   markupFileKey       String?           // R2 key for PDF with review annotations
@@ -1237,6 +1750,28 @@ model Review {
   @@index([revisionId])
   @@index([reviewerUserId, reviewedAt])
   @@index([companyId, decision])
+  @@index([requiresRfi, rfiResolvedAt])  // v2.1: Track unresolved RFIs
+}
+
+// v2.1: Multi-discipline review consolidation
+model DisciplineReviewStatus {
+  id                  String            @id @default(cuid())
+  companyId           String
+  documentId          String
+  revisionId          String
+  reviewRound         Int
+
+  discipline          String            // "MECHANICAL" | "ELECTRICAL" | "STRUCTURAL" | "HVAC" | "PIPING"
+  status              String            @default("PENDING")  // "PENDING" | "IN_PROGRESS" | "COMPLETED"
+  consolidatedDecision String?          // Discipline-level decision after all reviewers submit
+  completedAt         DateTime?
+
+  company             Company           @relation(fields: [companyId], references: [id])
+  document            Document          @relation(fields: [documentId], references: [id])
+  revision            DocumentRevision  @relation(fields: [revisionId], references: [id])
+
+  @@unique([documentId, revisionId, discipline])
+  @@index([companyId, status])
 }
 ```
 
@@ -1260,6 +1795,84 @@ model Review {
 2. **APPROVED_WITH_CONDITIONS** - Minor corrections required, vendor must acknowledge
 3. **REJECTED** - Major issues, cannot proceed
 4. **REVISE_AND_RESUBMIT** - Changes required, submit new revision for next round
+5. **RFI_REQUIRED** (v2.1) - Requires Request for Information before review can proceed
+
+### RFI (Request for Information) Workflow Integration (v2.1)
+
+**Business Context**: During review, engineers often encounter ambiguities or missing information that prevent approval. Instead of rejecting the document, they raise an RFI to request clarification from the vendor/designer. The document review cannot proceed until the RFI is resolved.
+
+**RFI Workflow**:
+1. **Reviewer Raises RFI During Review**:
+   - Reviewer selects `decision = "RFI_REQUIRED"`
+   - Sets `requiresRfi = true` and enters `comments` describing the information needed
+   - Review record saved with pending RFI status
+   - System auto-sends notification to document owner and vendor contact
+
+2. **Vendor/Designer Responds to RFI**:
+   - Vendor receives email: "RFI raised on Document ME-001 Rev A: Clarify pump motor rating"
+   - Vendor responds via document comment or uploads clarification document
+   - Vendor marks RFI as "Responded"
+
+3. **Reviewer Resolves RFI**:
+   - Reviewer reviews vendor's response
+   - Updates `rfiResolution` field with summary
+   - Sets `rfiResolvedAt = now()`
+   - Submits new review decision (typically "APPROVED" or "APPROVED_WITH_CONDITIONS")
+
+4. **Multiple RFIs on Same Document**:
+   - Multiple reviewers can raise independent RFIs on the same revision
+   - Document status shows: "PENDING_RFI (3 open, 2 resolved)"
+   - Review round cannot advance until ALL RFIs resolved
+
+**API Endpoints**:
+- `POST /api/documents/{id}/revisions/{revId}/review` - Submit review with RFI flag
+- `GET /api/documents/{id}/rfis` - Get all RFIs for document
+- `POST /api/documents/{id}/rfis/{reviewId}/respond` - Vendor responds to RFI
+- `POST /api/documents/{id}/rfis/{reviewId}/resolve` - Reviewer resolves RFI
+
+**UI Indicators**:
+- Document detail page shows RFI badge: "⚠️ 3 Open RFIs"
+- Review timeline shows RFI as separate status: "RFI Raised by John Doe → Responded by Vendor → Resolved"
+- Email notifications sent at each RFI state transition
+
+### Multi-Discipline Review Consolidation (v2.1)
+
+**Business Context**: Large documents (e.g., P&IDs, system diagrams) require review by multiple disciplines (Mechanical, Electrical, HVAC, Structural). The document can only advance when ALL disciplines approve. Each discipline may have multiple reviewers.
+
+**Consolidation Workflow**:
+1. **Assign Disciplines to Document**:
+   - When document uploaded, admin assigns required disciplines: `["MECHANICAL", "ELECTRICAL", "HVAC"]`
+   - System creates `DisciplineReviewStatus` entry for each discipline
+
+2. **Discipline Reviewers Submit Reviews**:
+   - Each reviewer tagged with their `discipline` field
+   - As reviews submitted, system tracks completion per discipline
+   - Example: Mechanical has 3 reviewers → 2 submitted → status = "IN_PROGRESS"
+
+3. **Discipline-Level Consolidation**:
+   - When ALL reviewers in a discipline submit reviews, status = "COMPLETED"
+   - System consolidates decisions:
+     - If ANY reviewer = "REJECTED" → `consolidatedDecision = "REJECTED"`
+     - If ANY reviewer = "REVISE_AND_RESUBMIT" → `consolidatedDecision = "REVISE_AND_RESUBMIT"`
+     - If ALL reviewers = "APPROVED" → `consolidatedDecision = "APPROVED"`
+     - If mixed "APPROVED" + "APPROVED_WITH_CONDITIONS" → `consolidatedDecision = "APPROVED_WITH_CONDITIONS"`
+
+4. **Overall Document Status**:
+   - Document advances only when ALL disciplines = "COMPLETED" with acceptable decisions
+   - UI shows discipline review matrix:
+     ```
+     Discipline Review Status:
+     ✅ Mechanical: APPROVED (3/3 reviewers)
+     ⏳ Electrical: IN_PROGRESS (2/3 reviewers)
+     ❌ HVAC: REJECTED (3/3 reviewers - requires resubmit)
+     ```
+
+**API Endpoints**:
+- `GET /api/documents/{id}/revisions/{revId}/discipline-status` - Get discipline review progress
+- `POST /api/documents/{id}/revisions/{revId}/consolidate` - Manually trigger consolidation (admin only)
+
+**Permissions**:
+- `REVIEW_CONSOLIDATE` - Manually override discipline consolidation logic
 
 **Markup Support**:
 - Reviewers can upload annotated PDF with review comments
@@ -1522,11 +2135,11 @@ CREATE INDEX idx_audit_vault_chain ON "AuditVaultEntry"(company_id, chain_index)
 ---
 
 **Document Control**
-Version: 2.0 (Updated based on Singapore shipyard feedback)
+Version: 2.1 (Production-Ready - All Critical Fixes Incorporated)
 Author: DocuRoute Product Team
 Last Updated: 2026-03-23
-Status: REVISED - Incorporating production feedback from pilot customer
-Next Review: 2026-04-15
+Status: PRODUCTION-READY - Addresses all pilot-blocking issues
+Next Review: 2026-04-30
 
 **Key Changes in v2.0**:
 - P2P7: Downgraded to assisted package generation (no direct API integration)
@@ -1536,3 +2149,14 @@ Next Review: 2026-04-15
 - P2P6: Enhanced with commissioning dossiers and punch list management
 - P2P1: Added bimCoordinates field for 3D viewer integration
 - Updated success metrics and risk mitigation to reflect realistic 2026 landscape
+
+**Key Changes in v2.1** (Critical Production Fixes):
+- P2P1: Equipment tag validation with company-specific format rules + tag generator
+- P2P5: BIM tag normalization engine with configurable extraction rules
+- P2P1: Equipment-Document link validation with bulk operations + revision tracking
+- P2P6: Offline conflict resolution with hybrid logical clocks
+- P2P6: Commissioning test templates with structured validation
+- P2P10: RFI (Request for Information) workflow integration
+- P2P7: Society-specific file naming templates
+- P2P9: Smart archival with access pattern tracking
+- P2P6: QR payload size optimization strategies
