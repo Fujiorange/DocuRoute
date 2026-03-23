@@ -56,6 +56,10 @@ model Equipment {
   bimCoordinates    Json?               // { x, y, z } coordinates in 3D model for viewer pinning
   bimLastImportedAt DateTime?           // Last import timestamp (NOT sync—one-way only)
 
+  // Bulk import tracking (v2.1.1 - Issue 2.2)
+  bulkImportBatchId String?             // For tracking CSV/Excel import batches
+  importedFrom      String?             // "BIM" | "CSV" | "MANUAL" | "TEMPLATE"
+
   metadata          Json?               // Flexible field for custom attributes
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -560,7 +564,6 @@ model VendorCompany {
   name              String
   code              String   // Unique vendor code (e.g., "VEND-001")
   country           String?
-  piiScope          String   @default("GLOBAL")  // "GLOBAL" | "PER_VENDOR_COMPANY"
 
   // Vendor portal access
   portalEnabled     Boolean  @default(false)
@@ -586,14 +589,14 @@ model VendorContact {
   phone           String?
   role            String?       // "TECHNICAL" | "COMMERCIAL" | "QA_QC"
   isActive        Boolean       @default(true)
+  notes           String?       // v2.1.1 - Issue 2.6: "Same individual as vendor XYZ"
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   vendorCompany   VendorCompany @relation(fields: [vendorCompanyId], references: [id], onDelete: Cascade)
 
-  // GDPR/PDPA Compliance: Conditional uniqueness based on piiScope
-  // If VendorCompany.piiScope = "PER_VENDOR_COMPANY", enforce unique email per vendor
-  // If "GLOBAL", allow same email across multiple vendors (consultant scenario)
+  // GDPR/PDPA Compliance: Simplified (v2.1.1 - Issue 2.6)
+  // Unique constraint per vendor. Same email allowed across vendors (add notes to track)
   @@unique([vendorCompanyId, email])
   @@index([email])
 }
@@ -603,6 +606,7 @@ model VendorSubmission {
   companyId       String
   vendorCompanyId String
   projectId       String
+  equipmentId     String?       // v2.1.1 - Issue 3.4: Link submission to specific equipment
   submissionCode  String        // Auto-generated: "VS-2026-001"
   title           String
   status          String        @default("DRAFT")  // DRAFT | SUBMITTED | UNDER_REVIEW | APPROVED | REJECTED
@@ -622,11 +626,13 @@ model VendorSubmission {
   company         Company       @relation(fields: [companyId], references: [id])
   vendorCompany   VendorCompany @relation(fields: [vendorCompanyId], references: [id])
   project         Project       @relation(fields: [projectId], references: [id])
+  equipment       Equipment?    @relation(fields: [equipmentId], references: [id])
   documents       Document[]    @relation("VendorSubmissionDocuments")
 
   @@unique([companyId, submissionCode])
   @@index([vendorCompanyId, status])
   @@index([projectId, status])
+  @@index([equipmentId])  // v2.1.1 - Issue 3.4
 }
 ```
 
@@ -1036,11 +1042,8 @@ model CommissioningRecord {
   testData        Json      // Test-specific structured data
   verdict         String    // "PASS" | "FAIL" | "RETEST_REQUIRED"
 
-  // Multi-party witness tracking
-  yardWitness     String?
-  vendorWitness   String?
-  classWitness    String?
-  ownerWitness    String?
+  // Multi-party witness tracking (v2.1.1 - Issue 2.7 Enhanced)
+  witnesses       Json      // [{ responsibility: "YARD_QA" | "VENDOR" | "CLASS_SOCIETY" | "OWNER" | "THIRD_PARTY", required: true, signedBy: null, signedAt: null, name: "" }]
 
   punchListItems  Json[]    // [{ item, severity, status, assignedTo, dueDate }]
 
@@ -1075,6 +1078,10 @@ model PunchItem {
   targetDate      DateTime?
   closedAt        DateTime?
 
+  // Escalation tracking (v2.1.1 - Issue 3.3)
+  escalationLevel Int       @default(0)  // 0 = none, 1 = manager, 2 = PM, 3 = executive
+  lastEscalatedAt DateTime?
+
   photoKeys       String[]
   notes           String?
 
@@ -1089,6 +1096,26 @@ model PunchItem {
   @@index([equipmentId, status])
   @@index([projectId, status, severity])
   @@index([assignedTo, status])
+  @@index([targetDate, status])  // v2.1.1 - Issue 3.3: For escalation queries
+}
+
+// v2.1.1 - Issue 3.2: Drawing Print Tracking
+model PrintLog {
+  id           String   @id @default(cuid())
+  companyId    String
+  documentId   String
+  revisionId   String
+  printedBy    String
+  copies       Int
+  printedAt    DateTime @default(now())
+
+  company      Company  @relation(fields: [companyId], references: [id])
+  document     Document @relation(fields: [documentId], references: [id])
+  revision     DocumentRevision @relation(fields: [revisionId], references: [id])
+
+  @@index([documentId, printedAt])
+  @@index([revisionId])
+  @@index([printedBy, printedAt])
 }
 ```
 
@@ -2036,7 +2063,15 @@ model DocumentRevision {
   supersedes      DocumentRevision? @relation("RevisionSupersession", fields: [supersededById], references: [id])
   supersededBy    DocumentRevision[] @relation("RevisionSupersession")
 
+  // Optimistic locking and check-out/check-in (v2.1.1 - Issue 2.3)
+  version         Int       @default(1)  // Increments on each update for conflict detection
+  lockedBy        String?   // User ID if checked out for editing
+  lockedUntil     DateTime? // Auto-release lock after 24h
+  lockedAt        DateTime? // When lock was acquired
+
   reviews         Review[]
+  equipmentDocLinks EquipmentDocument[]
+  printLogs       PrintLog[]  // v2.1.1 - Issue 3.2
 }
 
 model Review {
@@ -2284,6 +2319,414 @@ Body: {
 
 ---
 
+## Phase 2.1.1 Refinements & Additional Features
+
+This section documents additional refinements based on Singapore shipyard feedback after v2.1.
+
+### 2.1: Equipment Tag Uniqueness & Project Scoping
+
+**Problem**: `@@unique([projectId, tag])` allows same tag across projects, but vendor uploads don't know which project without explicit scoping.
+
+**Solution**: Enforce project context in all document and vendor submission workflows.
+
+**Implementation**:
+- Document upload form includes locked project selector based on current context
+- Vendor submission form requires project selection before upload
+- API endpoints require `projectId` parameter for all equipment-related operations
+- UI shows project context prominently: "Uploading to Project: Vessel #123"
+- Document.projectId is now required (no longer optional in Phase 1)
+
+**API Changes**:
+```typescript
+// All equipment operations require projectId
+GET /api/equipment?projectId={id}&parentId={id}
+POST /api/equipment  // Body must include projectId
+POST /api/documents/upload  // Body must include projectId
+POST /api/vendor-submissions  // Body must include projectId
+```
+
+### 2.2: Bulk Equipment Entry
+
+**Problem**: 2,500 equipment items per vessel. BIM import covers ~60%. Manual entry of 1,000 tags is non-starter.
+
+**Solution**: CSV import, Excel copy-paste, bulk edit operations, and duplicate detection.
+
+**Implementation**:
+- CSV upload template with tag validation preview
+- Excel copy-paste from procurement spreadsheets
+- Bulk edit: change lifecycle stage for 50 pumps at once
+- Duplicate detection: warn if tag already exists in another project
+- Import batch ID tracks all equipment from same source (added `bulkImportBatchId` and `importedFrom` fields)
+
+**API Endpoints**:
+```typescript
+POST /api/equipment/bulk-import
+Body: {
+  projectId: string,
+  source: "CSV" | "EXCEL" | "BIM",
+  data: Array<{ tag, name, type, parentTag, ... }>,
+  validateOnly?: boolean  // Preview mode
+}
+Response: {
+  valid: { tag, name }[],
+  errors: { row, tag, error }[],
+  duplicates: { tag, existsInProject }[],
+  batchId: string
+}
+
+PATCH /api/equipment/bulk-update
+Body: {
+  equipmentIds: string[],
+  updates: { lifecycleStage?: string, location?: string, ... }
+}
+```
+
+### 2.3: Document Version Conflict Handling
+
+**Problem**: Two engineers editing same document simultaneously causes data loss.
+
+**Solution**: Optimistic locking with version number + optional check-out/check-in.
+
+**Added Fields**: `DocumentRevision.version`, `lockedBy`, `lockedUntil`, `lockedAt`
+
+**Implementation**:
+- When opening document for edit, client stores current `version` number
+- On save, server rejects if `version` changed since open (HTTP 409 Conflict)
+- Client shows diff and forces merge or discard
+- Optional check-out/check-in: "John has this drawing open since 9:30am"
+- Locks auto-release after 24h
+
+**API Endpoints**:
+```typescript
+POST /api/documents/{id}/revisions/{revId}/check-out
+Response: { version: 5, lockedBy: userId, lockedUntil: timestamp }
+
+POST /api/documents/{id}/revisions/{revId}/check-in
+Body: { version: 5, updates: {...} }
+Response: { success: true, newVersion: 6 } | { error: "VERSION_CONFLICT", currentVersion: 7 }
+
+POST /api/documents/{id}/revisions/{revId}/force-unlock  // Admin only
+```
+
+### 2.4: Equipment Lifecycle Stage Automation (REJECTED)
+
+**Decision**: Manual update only. Photo does not equal installed.
+
+**Rationale**:
+- Photos could show allocated space, reference installations, or mock-ups
+- Installation requires sign-off from QA/QC and witnessing
+- Manual update ensures intentionality and accountability
+
+**Status**: No changes. User must manually update lifecycleStage.
+
+### 2.5: Equipment-Document Link Lifecycle & Cascade
+
+**Problem**: When document superseded, links to old revision remain active. When equipment decommissioned, links remain.
+
+**Solution**: Automatic cascade updates on supersede and decommission.
+
+**Fields Already Added in v2.1**: `validFrom`, `validUntil` on `EquipmentDocument`
+
+**Implementation**:
+```typescript
+// On document supersede
+async function onDocumentSupersede(oldRevisionId: string, newRevisionId: string) {
+  await prisma.equipmentDocument.updateMany({
+    where: { revisionId: oldRevisionId, validUntil: null },
+    data: { validUntil: new Date() }
+  });
+  // Optionally auto-create links for new revision if autoUpdateRev = true
+}
+
+// On equipment decommission
+async function onEquipmentDecommission(equipmentId: string) {
+  await prisma.equipmentDocument.updateMany({
+    where: { equipmentId, validUntil: null },
+    data: { validUntil: new Date() }
+  });
+}
+```
+
+**UI Changes**:
+- Equipment detail page shows "Current Links" (validUntil = null) vs "Historical Links" (validUntil != null)
+- Document detail page shows date ranges for each equipment link
+- Audit trail records all link lifecycle events
+
+### 2.6: Vendor PII Scope (Simplified)
+
+**Problem**: `piiScope` toggle adds unnecessary complexity.
+
+**Resolution**: Removed `piiScope` field. Default to PER_VENDOR_COMPANY. Allow same email across vendors with notes field.
+
+**Changes**:
+- Removed `VendorCompany.piiScope` field
+- Added `VendorContact.notes` field: "Same individual as vendor XYZ"
+- Unique constraint remains `@@unique([vendorCompanyId, email])`
+- If consultant works for multiple vendors, create separate contact records with same email
+
+**This is simpler and GDPR/PDPA compliant**.
+
+### 2.7: Commissioning Witness Tracking
+
+**Problem**: Templates have `requireYardWitness`, `requireClassWitness`, but no tracking of who is responsible or pending status.
+
+**Resolution**: Add witness responsibility enum and pending status tracking.
+
+**Changes**:
+- Replaced individual `yardWitness`, `vendorWitness`, etc. fields with single `witnesses` Json field
+- Witness structure: `[{ responsibility: "YARD_QA" | "VENDOR" | "CLASS_SOCIETY" | "OWNER" | "THIRD_PARTY", required: true, signedBy: null, signedAt: null, name: "" }]`
+- At commissioning record creation, auto-assign witness list based on template + equipment criticality
+- Dashboard shows pending witness sign-offs by party
+
+**API Endpoint**:
+```typescript
+POST /api/commissioning-records/{id}/witness-sign
+Body: {
+  responsibility: "CLASS_SOCIETY",
+  signedBy: userId,
+  name: "Inspector John Doe"
+}
+```
+
+### 2.8: Offline Conflict Resolution (Simplified)
+
+**Problem**: Hybrid logical clock adds unnecessary complexity for v1.
+
+**Resolution**: Last physical timestamp wins with email notification to both users.
+
+**Implementation**:
+- Store `lastModifiedAt` with each record (auto-updated by Prisma `@updatedAt`)
+- On sync, if local timestamp > server timestamp, overwrite server
+- Send email to both users: "Your offline changes on HVAC-FAN-001 on Mar 20 were overwritten by newer changes from Device B. Review here."
+- No manual conflict resolution UI needed for v1
+- Hybrid logical clocks deferred to Phase 3 if needed
+
+**No database changes required** (already have `updatedAt` field).
+
+### 3.1: Auto-Transmittal (REJECTED)
+
+**Decision**: Document Team review is mandatory. No auto-issue.
+
+**Rationale**:
+- Document Team catches formatting errors, missing stamps, incorrect revision numbers
+- Automation would cause arguments between design and production teams
+- Quality control is the Document Team's primary function
+
+**Status**: No changes. Transmittal workflow remains manual review.
+
+### 3.2: Drawing Print Tracking
+
+**Problem**: Paper drawings still used on site. No tracking of which revision is in circulation.
+
+**Solution**: Log all prints and flag superseded drawings.
+
+**Database**: Added `PrintLog` model
+
+**Implementation**:
+- When user prints drawing, log: which revision, who printed, how many copies, timestamp
+- QR code on printed copy includes revision hash
+- When drawing is superseded, flag all printed copies as "INVALID"
+- Worker scanning QR sees: "This drawing is superseded. Discard and reprint."
+
+**API Endpoint**:
+```typescript
+POST /api/documents/{id}/print-log
+Body: {
+  revisionId: string,
+  copies: number
+}
+
+GET /api/documents/{id}/print-logs
+Response: [{ revision, printedBy, copies, printedAt, isSuperseded: boolean }]
+```
+
+**QR Verification Enhancement**:
+```typescript
+GET /api/documents/{id}/verify?revisionHash={hash}
+Response: {
+  isValid: boolean,
+  isSuperseded: boolean,
+  currentRevision: "C",
+  message: "This drawing is superseded. Current revision is C. Reprint required."
+}
+```
+
+### 3.3: Punch Item Escalation
+
+**Problem**: Punch items left open past target date delay commissioning.
+
+**Solution**: Automatic escalation chain similar to change notices.
+
+**Added Fields**: `PunchItem.escalationLevel`, `lastEscalatedAt`
+
+**Escalation Rules**:
+- 7 days before target → reminder to assignee (escalationLevel = 0)
+- Target date passed → assignee's manager notified (escalationLevel = 1)
+- 7 days overdue → project manager notified (escalationLevel = 2)
+- 30 days overdue → executive review (escalationLevel = 3)
+- Dashboard widget: "Punch items overdue this week"
+
+**Implementation**: Background job runs daily to check punch items and escalate.
+
+**API Endpoint**:
+```typescript
+GET /api/punch-items/overdue?projectId={id}
+Response: [{ itemNumber, description, assignedTo, daysOverdue, escalationLevel }]
+
+POST /api/punch-items/{id}/escalate  // Manual escalation
+```
+
+### 3.4: Vendor Submission Integration
+
+**Problem**: Vendor submissions exist separately from equipment.
+
+**Solution**: Link submissions directly to equipment records.
+
+**Added Field**: `VendorSubmission.equipmentId`
+
+**Implementation**:
+- On equipment page, show: "Pending vendor submission: Main Engine Installation Drawing (submitted 3 days ago, awaiting review)"
+- When submission is approved, optionally auto-update equipment status (configurable)
+
+**API Enhancement**:
+```typescript
+GET /api/equipment/{id}
+Response: {
+  ...equipment,
+  pendingSubmissions: [{ submissionCode, title, status, submittedAt }]
+}
+```
+
+### 4.1: Equipment Tree Rendering Performance
+
+**Problem**: 10,000 equipment items will kill browser performance if loaded all at once.
+
+**Solution**: Virtualized tree with on-demand loading.
+
+**Implementation**:
+- Load top-level systems only on initial render
+- Expand children on demand (API call per node)
+- Use `react-virtuoso` or `react-window` for long lists
+- Test with 15,000 items before pilot
+
+**API Changes**:
+```typescript
+GET /api/equipment?projectId={id}&parentId={id}&limit=50&offset=0
+// Returns paginated children for a given parent
+
+GET /api/equipment/tree?projectId={id}&maxDepth=2
+// Returns tree structure up to specified depth
+```
+
+### 4.2: Cross-Project Search
+
+**Problem**: Engineers need to find drawings from past projects.
+
+**Solution**: Cross-project search with permission checks.
+
+**Implementation**:
+- Search endpoint accepts optional `projectId`. If omitted, search across all accessible projects
+- User must have `VIEW_DOCUMENT` permission on each project returned
+- Search results show project name
+- Filter: "Past projects (archived)" toggle
+
+**API Changes**:
+```typescript
+GET /api/documents/search?q={query}&projectId={id}&includeArchived={boolean}
+// projectId optional; if omitted, search all accessible projects
+
+Response: [{
+  documentId, code, revision, projectId, projectName, isArchived, ...
+}]
+```
+
+### 4.3: Bulk QR Code Printing
+
+**Problem**: 500-page PDF for 500 equipment items is unusable.
+
+**Solution**: Support label printer formats.
+
+**Implementation**:
+- Support Avery label format (30mm × 40mm) with configurable layout
+- Support ZPL (Zebra Programming Language) for industrial label printers
+- Batch print by area: "Engine Room labels"
+
+**API Endpoint**:
+```typescript
+POST /api/equipment/qr-codes/bulk
+Body: {
+  equipmentIds: string[],
+  format: "pdf" | "avery" | "zpl",
+  pageSize?: "A4" | "LETTER",
+  codesPerPage?: 24,
+  labelSize?: "30x40mm",
+  area?: "Engine Room"  // For filtering
+}
+Response: PDF/ZPL file download
+```
+
+### 5.1: BIM Import Format Support
+
+**Problem**: AVEVA, Tribon, Cadmatic have different export formats.
+
+**Solution**: Configurable column mapping with test import.
+
+**Implementation**:
+- CSV import with configurable column mapping UI (user maps "Tag" column to tag field)
+- Provide pre-configured mapping templates for each BIM system
+- Test import feature: shows first 10 rows with validation errors before full import
+- Accept CSV, JSON, XML (with XSLT transformation option)
+
+**UI Flow**:
+1. User uploads CSV file
+2. System auto-detects headers and suggests mapping
+3. User confirms/adjusts mapping: "Column A → Equipment Tag", "Column B → Name"
+4. System runs validation on first 10 rows and shows preview
+5. User confirms → full import with batch ID
+
+**Saved Mapping Templates**:
+```typescript
+interface BIMImportMapping {
+  id: string;
+  companyId: string;
+  name: string;  // "AVEVA Marine Standard"
+  bimSystem: string;  // "AVEVA_MARINE"
+  columnMappings: {
+    tagColumn: string,
+    nameColumn: string,
+    typeColumn: string,
+    parentColumn: string,
+    // ... other mappings
+  };
+}
+```
+
+### 5.2: Classification Society Package Formats (Research Required)
+
+**Status**: Deferred to detailed research. Implementation notes only.
+
+**Research Notes**:
+- **ABS**: Requires separate files per drawing (no merged PDF)
+- **DNV**: Accepts merged PDF with cover sheet
+- **Lloyd's Register**: Requires XML metadata file + individual files
+- **Bureau Veritas**: Specific file naming conventions per vessel type
+
+**Action**: Research each society's submission portal requirements before implementing package generators in Phase 2B.
+
+### 5.3: Cold Storage Retrieval Time (As-Is)
+
+**Decision**: No changes. Users understand cold storage delays.
+
+**Rationale**:
+- Projects in cold storage are typically >24 months old
+- If engineer needs drawings from 20-year-old project for maintenance, they are not rushing
+- 1-5 minute wait is acceptable; 1-day wait is also acceptable for very old projects
+- Can add "restore entire project" option later if requested
+
+**Status**: No changes to P2P9 cold storage implementation.
+
+---
+
 ## Implementation Roadmap
 
 ### Phase 2A (Weeks 1-4): Core Features
@@ -2460,10 +2903,10 @@ CREATE INDEX idx_audit_vault_chain ON "AuditVaultEntry"(company_id, chain_index)
 ---
 
 **Document Control**
-Version: 2.1 (Production-Ready - All Critical Fixes Incorporated)
+Version: 2.1.1 (Production-Ready - All Refinements Incorporated)
 Author: DocuRoute Product Team
 Last Updated: 2026-03-23
-Status: PRODUCTION-READY - Pilot contract ready (all blockers resolved)
+Status: PRODUCTION-READY - Pilot contract ready (all blockers + refinements resolved)
 Next Review: 2026-04-30
 
 **Key Changes in v2.0**:
@@ -2493,3 +2936,21 @@ Next Review: 2026-04-30
 - P2P1: Added EquipmentChangeLog reviewer notification trigger (notifies active reviewers when equipment changes)
 - P2P6: Linked CommissioningRecord and PunchItem to EquipmentChangeLog (auto-logs lifecycle changes)
 - P2P4: Added VENDOR_SUBMISSION_TRIGGER_REVIEW permission
+
+**v2.1.1 Refinements** (Additional Feedback Incorporated):
+- 2.1: Equipment tag uniqueness - Enforced project scoping for all uploads
+- 2.2: Bulk equipment entry - CSV import, Excel paste, bulk edit, duplicate detection (bulkImportBatchId, importedFrom)
+- 2.3: Document version conflict handling - Optimistic locking + check-out/check-in (version, lockedBy, lockedUntil)
+- 2.5: Equipment-Document link lifecycle - Cascade updates on supersede and decommission
+- 2.6: Vendor PII scope - Simplified by removing piiScope toggle, added VendorContact.notes
+- 2.7: Commissioning witness tracking - Enhanced with responsibility tracking (witnesses Json)
+- 2.8: Offline conflict resolution - Simplified to last-write-wins with email notification
+- 3.2: Drawing print tracking - PrintLog model, superseded drawing alerts
+- 3.3: Punch item escalation - Auto-escalation chain (escalationLevel, lastEscalatedAt)
+- 3.4: Vendor submission integration - Link to equipment (VendorSubmission.equipmentId)
+- 4.1: Equipment tree rendering - Virtualized tree with on-demand loading
+- 4.2: Cross-project search - Permission-aware search across projects
+- 4.3: Bulk QR code printing - Avery labels + ZPL format support
+- 5.1: BIM import format support - Configurable column mapping with test import
+- Rejected: 2.4 (Equipment lifecycle automation), 3.1 (Auto-transmittal)
+- As-Is: 5.3 (Cold storage retrieval time)
