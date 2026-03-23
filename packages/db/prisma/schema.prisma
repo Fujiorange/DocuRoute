@@ -20,8 +20,7 @@ model Role {
   updatedAt     DateTime @updatedAt
   company       Company  @relation(fields: [companyId], references: [id])
   users         User[]
-  // GIN index for permission queries — add via raw SQL after migration:
-  // CREATE INDEX idx_role_permissions ON "Role" USING GIN (permissions);
+  // GIN index for permission queries — created in migration 20260323_performance_indexes
   // Required by createNotificationsForPermission to avoid full-table scans.
 
   @@unique([companyId, name])
@@ -114,10 +113,13 @@ model Document {
   updatedAt            DateTime  @updatedAt
   company              Company   @relation(fields: [companyId], references: [id])
   project              Project?  @relation(fields: [projectId], references: [id])
+  // pg_trgm GIN indexes for fuzzy search — created in migration 20260323_performance_indexes
+  // Required for fast document search (<500ms with 100,000+ documents)
 
   @@index([companyId, status])
   @@index([companyId, createdAt])
   @@index([companyId, projectId])
+  @@index([projectId, status, createdAt])
 }
 
 // Minimal DocumentRevision model — required for QR verification route
@@ -244,7 +246,10 @@ model Notification {
   metadata  Json?
   createdAt DateTime @default(now())
   company   Company  @relation(fields: [companyId], references: [id])
+  // Composite index for unread notifications — created in migration 20260323_performance_indexes
+  // Optimizes common query: "Get unread notifications ordered by date"
 
   @@index([userId, isRead])
   @@index([companyId, createdAt])
+  @@index([userId, isRead, createdAt])
 }
