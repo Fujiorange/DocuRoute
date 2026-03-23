@@ -85,19 +85,91 @@ export async function watermarkInChildProcess(
 }
 
 export async function getCachedWatermark(fileKey: string): Promise<Buffer | null> {
-  // TODO: Implement R2 retrieval with key: watermarked/{fileKey}
   // PERFORMANCE: This is critical for avoiding duplicate watermark processing
   // Expected cache hit rate: 60-80% (same documents downloaded multiple times)
-  // See docs/PERFORMANCE_ANALYSIS.md section 1.3 for implementation example
-  return null
+  try {
+    const bucketName = process.env.R2_BUCKET_NAME
+
+    if (!bucketName) {
+      console.warn('R2_BUCKET_NAME not configured, watermark caching disabled')
+      return null
+    }
+
+    // Import S3Client dynamically to avoid circular dependencies
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3')
+    const client = new S3Client({
+      region: 'auto',
+      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+      },
+    })
+
+    const cacheKey = `watermarked/${fileKey}`
+    const command = new GetObjectCommand({
+      Bucket: bucketName,
+      Key: cacheKey,
+    })
+
+    const response = await client.send(command)
+
+    // Stream to buffer
+    const chunks: Uint8Array[] = []
+    const stream = response.Body as any
+    for await (const chunk of stream) {
+      chunks.push(chunk)
+    }
+
+    return Buffer.concat(chunks)
+  } catch (error: any) {
+    // NoSuchKey means cache miss (not an error)
+    if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
+      return null
+    }
+    // Log other errors but don't fail - just return null (cache miss)
+    console.warn('Watermark cache retrieval error:', error.message)
+    return null
+  }
 }
 
 export async function saveCachedWatermark(fileKey: string, buffer: Buffer): Promise<void> {
-  // TODO: Implement R2 upload with key: watermarked/{fileKey}
   // Cache strategy:
-  //   - Key format: watermarked/{originalFileKey}-{latestRevisionCode}
+  //   - Key format: watermarked/{originalFileKey}
   //   - TTL: 7 days (revisions rarely change after approval)
-  // See docs/PERFORMANCE_ANALYSIS.md section 1.3 for implementation example
+  //   - Note: R2 doesn't support automatic expiration
+  //     In Phase 2, implement cleanup job to delete cached files older than 7 days
+  try {
+    const bucketName = process.env.R2_BUCKET_NAME
+
+    if (!bucketName) {
+      console.warn('R2_BUCKET_NAME not configured, watermark caching disabled')
+      return
+    }
+
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
+    const client = new S3Client({
+      region: 'auto',
+      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+      },
+    })
+
+    const cacheKey = `watermarked/${fileKey}`
+    const command = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: cacheKey,
+      Body: buffer,
+      ContentType: 'application/pdf',
+    })
+
+    await client.send(command)
+  } catch (error: any) {
+    // Don't fail watermark operation if cache save fails - just log warning
+    console.warn('Watermark cache save error:', error.message)
+  }
 }
 
 export async function terminatePool(): Promise<void> {
