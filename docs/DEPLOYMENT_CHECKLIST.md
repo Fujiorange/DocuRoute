@@ -2,11 +2,48 @@
 
 This document tracks all post-deployment SQL commands and manual steps required after deploying schema migrations to production.
 
-## Phase 1  Database Schema
+## Phase 1  Database Schema
+
+### CRITICAL: Row Level Security (RLS) Migration
+
+**SECURITY FIX (2026-03-23)**: The multi-tenancy architecture has been upgraded from application-level Prisma Client Extensions to database-level Row Level Security (RLS).
+
+**Why this change is critical:**
+- Previous approach: Prisma extensions injected `companyId` into queries, but extensions DO NOT apply inside interactive transactions
+- Risk: One forgotten `companyId` in a transaction = cross-tenant data leakage
+- New approach: RLS policies enforce tenant isolation at the database level, including inside transactions
+- Benefit: Fail-safe default - if `companyId` is not set, queries return NOTHING (not another tenant's data)
+
+**Migration file:** `packages/db/prisma/migrations/20260323_rls_multi_tenancy/migration.sql`
+
+This migration must be run BEFORE deploying the updated application code. Run it manually in Supabase SQL Editor:
+
+```bash
+# Copy the SQL from the migration file and execute in Supabase SQL Editor
+cat packages/db/prisma/migrations/20260323_rls_multi_tenancy/migration.sql
+```
+
+**Verification:**
+```sql
+-- Verify RLS is enabled on all tenant-scoped tables
+SELECT tablename, rowsecurity
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename IN ('Role', 'User', 'Project', 'Document', 'DocumentRevision', 'AuditLog', 'AuditVaultEntry', 'Invitation', 'Notification', 'TransmittalCounter', 'CompanyOnboarding')
+ORDER BY tablename;
+-- Expected: All tables should have rowsecurity = TRUE
+
+-- Verify RLS policies exist
+SELECT tablename, policyname
+FROM pg_policies
+WHERE schemaname = 'public'
+ORDER BY tablename, policyname;
+-- Expected: One policy per tenant-scoped table (11 policies total)
+```
 
 ### Post-Migration SQL Commands
 
-After running the Phase 1 migration (`npx prisma migrate deploy`), execute the following SQL commands in the Supabase SQL Editor:
+After running the RLS migration and Phase 1 migration (`npx prisma migrate deploy`), execute the following SQL commands in the Supabase SQL Editor:
 
 #### 1. GIN Index for Role Permissions (REQUIRED)
 
@@ -60,6 +97,8 @@ SELECT extname FROM pg_extension WHERE extname = 'pg_trgm';
 
 ### Post-Migration Verification Checklist
 
+- [ ] RLS enabled on all tenant-scoped tables (11 tables total)
+- [ ] RLS policies created (11 policies total)
 - [ ] GIN index `idx_role_permissions` created and verified
 - [ ] Audit vault trigger `audit_vault_immutable` created and verified
 - [ ] `pg_trgm` extension enabled and verified
@@ -67,26 +106,36 @@ SELECT extname FROM pg_extension WHERE extname = 'pg_trgm';
 - [ ] Application restarted to use new Prisma client
 - [ ] Smoke test: Create a test company, role, and user
 - [ ] Smoke test: Attempt to update an AuditVaultEntry (should fail with error)
+- [ ] Smoke test: Verify tenant isolation - query without setting companyId should return no rows
 
-## Phase 2  (Reserved for future migrations)
+## Phase 2  (Reserved for future migrations)
 
 ---
 
-**CRITICAL TRANSACTION RULE:**
+**TRANSACTION ISOLATION - RLS APPROACH:**
 
-Prisma interactive transactions (`tx` client) do NOT inherit the companyId extension from `getPrismaForCompany()`. Always pass `companyId` explicitly in every `tx.model.create/update/upsert` call inside a transaction callback.
+With Row Level Security (RLS) enabled, tenant isolation is enforced at the database level for ALL queries, including inside transactions.
 
-Example:
+The application sets the tenant context using `SET LOCAL app.current_company_id = '<companyId>'` which is automatically executed by the Prisma Client Extension in `getPrismaForCompany()`.
+
+**RLS Benefits:**
+- No manual `companyId` injection required in transactions
+- Database enforces isolation automatically
+- Forgotten `companyId` = query returns nothing (fail-safe)
+- Works with interactive transactions: `$transaction(async tx => {...})`
+
+**Legacy Code:**
+Existing code that explicitly passes `companyId` in transactions will continue to work (no breaking changes). The RLS policies will filter based on `current_setting('app.current_company_id')` AND the explicit `companyId` in the query.
+
+**Example:**
 ```typescript
 await prisma.$transaction(async (tx) => {
-  // WRONG: companyId not passed, extension won't apply
-  await tx.document.create({ data: { filename: 'test.pdf' } })
-
-  // CORRECT: companyId passed explicitly
+  // RLS automatically filters by current_setting('app.current_company_id')
+  // No explicit companyId needed (but you can still pass it if you want)
   await tx.document.create({
     data: {
-      companyId: session.companyId,  // EXPLICIT
-      filename: 'test.pdf'
+      filename: 'test.pdf',
+      // companyId will be enforced by RLS even if not explicitly passed
     }
   })
 })
