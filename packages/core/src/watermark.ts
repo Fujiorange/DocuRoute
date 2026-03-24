@@ -1,5 +1,6 @@
 import workerpool from 'workerpool'
 import path from 'path'
+import { createTempFile, readAndDeleteTempFile, cleanupTempFile } from './temp-file'
 
 /**
  * POOL_SIZE = 2, MAX_WORKER_MEMORY_MB = 512
@@ -48,23 +49,27 @@ export async function watermarkInChildProcess(
     throw new Error('FILE_TOO_LARGE')
   }
 
+  let inputPath: string | null = null
+  let outputPath: string | null = null
+
   try {
     const workerPool = getPool()
 
-    // PERFORMANCE: Converting to base64 creates 33% memory overhead (200MB → 267MB)
-    // TODO: Use temporary files instead for better memory efficiency
-    // See docs/PERFORMANCE_ANALYSIS.md section 1.2 for implementation details
-    const inputBase64 = inputBuffer.toString('base64')
+    // CRITICAL FIX: Use file-based IPC instead of base64 encoding
+    // This eliminates 33% memory overhead and prevents OOM on files >150MB
+    inputPath = await createTempFile(inputBuffer, 'docuroute-watermark-in-')
+    outputPath = inputPath.replace('-in-', '-out-')
 
     interface WatermarkResult {
       success: boolean
-      buffer?: string
+      outputPath?: string
       reason?: string
     }
 
-    const result = await workerPool.exec('watermarkPDF', [
+    const result = await workerPool.exec('watermarkPDFFromFile', [
       {
-        inputBase64,
+        inputPath,
+        outputPath,
         latestRevisionCode,
         documentId,
         revisionId,
@@ -75,12 +80,20 @@ export async function watermarkInChildProcess(
       throw new Error(result.reason || 'PROCESSING_ERROR')
     }
 
-    // PERFORMANCE: Converting back from base64 allocates another buffer
-    return Buffer.from(result.buffer!, 'base64')
+    // Read output file and clean up
+    return await readAndDeleteTempFile(result.outputPath!)
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('Watermark child process error:', errorMessage)
     throw error
+  } finally {
+    // Cleanup temp files in case of error
+    if (inputPath) {
+      await cleanupTempFile(inputPath).catch(() => {})
+    }
+    if (outputPath) {
+      await cleanupTempFile(outputPath).catch(() => {})
+    }
   }
 }
 

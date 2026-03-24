@@ -145,7 +145,10 @@ export async function middleware(req: NextRequest) {
 }
 
 /**
- * Resolve permissions from Redis cache, with database fallback
+ * Resolve permissions from Redis cache, with version-aware validation
+ *
+ * CRITICAL FIX: Compare JWT permissionVersion with current version in Redis
+ * If mismatch detected, force refresh and log for audit
  *
  * @param companyId - Company ID
  * @param roleId - Role ID
@@ -158,7 +161,28 @@ async function resolvePermissionsFromCache(
   permissionVersion: number
 ): Promise<string[]> {
   try {
-    // Try to get from Redis cache
+    // Get current version from Redis
+    const currentVersion = await getPermissionVersion(companyId, roleId)
+
+    // CRITICAL FIX: Check version mismatch
+    if (permissionVersion !== currentVersion) {
+      console.warn(
+        `Permission version mismatch for role ${roleId}: JWT has v${permissionVersion}, current is v${currentVersion}. Forcing refresh.`
+      )
+
+      // Force refresh from database with current version
+      const permissions = await resolvePermissions(roleId)
+
+      // Cache with current version
+      await cachePermissions(companyId, roleId, permissions, currentVersion)
+
+      // TODO: Log to audit vault for compliance tracking
+      // This indicates a user session with stale permissions attempted access
+
+      return permissions
+    }
+
+    // Try to get from Redis cache (version matches)
     const cached = await getCachedPermissions(companyId, roleId, permissionVersion)
 
     if (cached) {
@@ -169,9 +193,6 @@ async function resolvePermissionsFromCache(
     console.log(`Permission cache miss for role ${roleId} version ${permissionVersion}, falling back to database`)
 
     const permissions = await resolvePermissions(roleId)
-
-    // Get current version (may have changed since JWT was issued)
-    const currentVersion = await getPermissionVersion(companyId, roleId)
 
     // Cache with current version
     await cachePermissions(companyId, roleId, permissions, currentVersion)

@@ -23,6 +23,7 @@
 
 const qrcode = require('qrcode')
 const { PDFDocument, rgb, degrees } = require('pdf-lib')
+const fs = require('fs').promises
 
 async function generateQRCodeInline(documentId, revisionId) {
   const baseUrl = process.env.QR_VERIFICATION_BASE_URL || 'https://docuroute.io'
@@ -57,7 +58,7 @@ async function watermarkPDF({ inputBase64, latestRevisionCode, documentId, revis
     for (const page of pages) {
       const { width, height } = page.getSize()
 
-      // Add "SUPERSEDED" watermark text (tiled, 45°, red, 48pt)
+      // Add "SUPERSEDED" watermark text (tiled, 45ï¿½, red, 48pt)
       const text = 'SUPERSEDED'
       const fontSize = 48
       const textWidth = fontSize * text.length * 0.6 // Approximate
@@ -89,7 +90,7 @@ async function watermarkPDF({ inputBase64, latestRevisionCode, documentId, revis
 
       page.pushOperators(...page.doc.context.restore())
 
-      // Add QR code bottom-right (140×140px)
+      // Add QR code bottom-right (140ï¿½140px)
       const qrSize = 140
       const qrX = width - qrSize - 20
       const qrY = 20
@@ -121,4 +122,99 @@ async function watermarkPDF({ inputBase64, latestRevisionCode, documentId, revis
   }
 }
 
-module.exports = { watermarkPDF }
+/**
+ * NEW: File-based watermarking for memory efficiency
+ * Fixes OOM crashes on files >150MB by using file streaming instead of base64
+ */
+async function watermarkPDFFromFile({ inputPath, outputPath, latestRevisionCode, documentId, revisionId }) {
+  try {
+    // Read PDF from file
+    const pdfBytes = await fs.readFile(inputPath)
+    let pdfDoc
+
+    try {
+      pdfDoc = await PDFDocument.load(pdfBytes)
+    } catch (loadError) {
+      // PDF is encrypted or corrupted
+      if (loadError.message && loadError.message.includes('encrypted')) {
+        return { success: false, reason: 'ENCRYPTED' }
+      }
+      return { success: false, reason: 'PROCESSING_ERROR', error: loadError.message }
+    }
+
+    // Generate QR code
+    const qrDataUrl = await generateQRCodeInline(documentId, revisionId)
+    const qrImage = await pdfDoc.embedPng(qrDataUrl)
+
+    // Get pages
+    const pages = pdfDoc.getPages()
+
+    // Watermark each page
+    for (const page of pages) {
+      const { width, height } = page.getSize()
+
+      // Add "SUPERSEDED" watermark text (tiled, 45Â°, red, 48pt)
+      const text = 'SUPERSEDED'
+      const fontSize = 48
+      const textWidth = fontSize * text.length * 0.6 // Approximate
+      const spacing = 150
+
+      page.pushOperators(
+        // Save graphics state
+        ...page.doc.context.save(),
+        // Set text rendering mode to stroke (outline)
+        ...page.doc.context.setTextRenderingMode(1),
+        // Set stroke color to red
+        ...page.doc.context.setStrokingColor(rgb(0.8, 0, 0)),
+        // Set line width
+        ...page.doc.context.setLineWidth(1)
+      )
+
+      for (let x = -width; x < width * 2; x += spacing) {
+        for (let y = -height; y < height * 2; y += spacing) {
+          page.drawText(text, {
+            x,
+            y,
+            size: fontSize,
+            color: rgb(0.8, 0, 0),
+            opacity: 0.2,
+            rotate: degrees(45),
+          })
+        }
+      }
+
+      page.pushOperators(...page.doc.context.restore())
+
+      // Add QR code bottom-right (140Ã—140px)
+      const qrSize = 140
+      const qrX = width - qrSize - 20
+      const qrY = 20
+
+      page.drawImage(qrImage, {
+        x: qrX,
+        y: qrY,
+        width: qrSize,
+        height: qrSize,
+      })
+
+      // Add "Scan to verify" text below QR (8pt)
+      page.drawText('Scan to verify', {
+        x: qrX + 10,
+        y: qrY - 15,
+        size: 8,
+        color: rgb(0.2, 0.2, 0.2),
+      })
+    }
+
+    // Save PDF to output file
+    const watermarkedBytes = await pdfDoc.save()
+    await fs.writeFile(outputPath, watermarkedBytes)
+
+    return { success: true, outputPath }
+  } catch (error) {
+    console.error('Watermark processing error:', error)
+    return { success: false, reason: 'PROCESSING_ERROR', error: error.message }
+  }
+}
+
+module.exports = { watermarkPDF, watermarkPDFFromFile }

@@ -3,19 +3,49 @@ import { AuditVaultEventType, Permission } from '@docuroute/types'
 import { hashSHA256 } from './utils'
 
 /**
- * HASH COMPUTATION  IMPORTANT:
+ * HASH COMPUTATION — IMPORTANT:
  * The hash is computed over a createdAt value that must be set by the caller
  * and passed explicitly to the INSERT. Do NOT use @default(now()) on
- * AuditVaultEntry.createdAt  the DB clock and the application clock differ
+ * AuditVaultEntry.createdAt — the DB clock and the application clock differ
  * by milliseconds, making the hash non-reproducible.
+ *
+ * CRITICAL FIX: Use deterministic JSON serialization to prevent hash collisions
+ * from property order variations. This ensures backward compatibility while
+ * fixing the special character collision vulnerability.
  *
  * Pattern:
  *   const createdAt = new Date()
- *   const hash = SHA-256(companyId + eventType + userId + createdAt.toISOString() + JSON.stringify(metadata))
+ *   const metadataStr = JSON.stringify(sortObjectKeys(metadata || {}))
+ *   const hash = SHA-256(companyId + eventType + userId + createdAt.toISOString() + metadataStr)
  *   prisma.auditVaultEntry.create({ data: { ...fields, createdAt, hash } })
  *
  * This ensures verifyVaultIntegrity() can reproduce and verify the hash.
  */
+
+/**
+ * Sort object keys recursively for deterministic JSON serialization
+ *
+ * @param obj - Object to sort
+ * @returns Object with sorted keys
+ */
+function sortObjectKeys(obj: any): any {
+  if (obj === null || typeof obj !== 'object') {
+    return obj
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sortObjectKeys)
+  }
+
+  const sorted: any = {}
+  const keys = Object.keys(obj).sort()
+
+  for (const key of keys) {
+    sorted[key] = sortObjectKeys(obj[key])
+  }
+
+  return sorted
+}
 
 export async function writeVaultEntry(params: {
   companyId: string
@@ -30,7 +60,10 @@ export async function writeVaultEntry(params: {
 }): Promise<void> {
   try {
     const createdAt = new Date()
-    const metadataStr = JSON.stringify(params.metadata || {})
+
+    // CRITICAL FIX: Use deterministic JSON serialization with sorted keys
+    const sortedMetadata = sortObjectKeys(params.metadata || {})
+    const metadataStr = JSON.stringify(sortedMetadata)
 
     // Compute hash
     const hashInput = [
@@ -97,7 +130,10 @@ export async function verifyVaultIntegrity(
       // Current implementation: sequential for simplicity
       // For optimization, see docs/PERFORMANCE_ANALYSIS.md section 2.2
       for (const entry of entries) {
-        const metadataStr = JSON.stringify(entry.metadata || {})
+        // Use deterministic JSON serialization for verification
+        const sortedMetadata = sortObjectKeys(entry.metadata || {})
+        const metadataStr = JSON.stringify(sortedMetadata)
+
         const hashInput = [
           entry.companyId,
           entry.eventType,

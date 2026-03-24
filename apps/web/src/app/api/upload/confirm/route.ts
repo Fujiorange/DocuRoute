@@ -5,6 +5,9 @@ import { requirePermission, withApiHandler } from '@/lib/auth'
 import { getPrismaForCompany } from '@docuroute/db'
 import { headObject } from '@docuroute/core/src/r2'
 import { logAuditEvent } from '@docuroute/core/src/audit'
+import { validateUploadedFile } from '@/lib/file-validation'
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { Readable } from 'stream'
 import {
   Permission,
   EngineeringDiscipline,
@@ -12,9 +15,11 @@ import {
   DocumentStatus,
   WatermarkStatus,
   AuditAction,
+  AuditVaultEventType,
   MAX_WATERMARK_SIZE_BYTES,
 } from '@docuroute/types'
-import { validationError, notFound } from '@docuroute/core/src/errors'
+import { validationError, notFound, complianceViolation } from '@docuroute/core/src/errors'
+import { writeVaultEntry } from '@docuroute/core/src/audit-vault'
 import { authOptions } from '../../auth/[...nextauth]/route'
 
 /**
@@ -73,6 +78,60 @@ export const POST = withApiHandler(async (req: Request) => {
   if (!r2Object) {
     throw notFound('File not found in storage. Upload may have failed.')
   }
+
+  // CRITICAL FIX: Post-upload hash and file type validation
+  // Download file from R2 and validate hash + detect actual file type
+  const accountId = process.env.R2_ACCOUNT_ID
+  const bucketName = process.env.R2_BUCKET_NAME
+  const r2Client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  })
+
+  const getObjectCommand = new GetObjectCommand({
+    Bucket: bucketName,
+    Key: fileKey,
+  })
+
+  const r2Response = await r2Client.send(getObjectCommand)
+  const stream = r2Response.Body as Readable
+
+  const validationResult = await validateUploadedFile(stream, sha256Hash, fileSize)
+
+  if (!validationResult.isValid) {
+    // Log compliance violation to AuditVault (immutable record)
+    await writeVaultEntry({
+      companyId: session.user.companyId,
+      eventType: AuditVaultEventType.COMPLIANCE_VIOLATION,
+      userId: session.user.userId,
+      userEmail: session.user.email!,
+      ipAddress: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || undefined,
+      userAgent: req.headers.get('user-agent') || undefined,
+      permissionsUsed: [Permission.UPLOAD_DOCUMENT],
+      metadata: {
+        fileKey,
+        filename,
+        expectedHash: sha256Hash,
+        actualHash: validationResult.actualHash,
+        error: validationResult.error,
+        violationType: 'FILE_INTEGRITY_VIOLATION',
+      },
+    })
+
+    throw complianceViolation(
+      `File integrity check failed: ${validationResult.error}`,
+      { expectedHash: sha256Hash, actualHash: validationResult.actualHash }
+    )
+  }
+
+  // Log successful validation with detected file type
+  console.log(
+    `File validation passed: ${filename} (hash=${validationResult.actualHash.substring(0, 8)}..., type=${validationResult.detectedMimeType})`
+  )
 
   // SERVER-SIDE METADATA VALIDATION (stub for now, full implementation in Phase 2)
   // TODO Phase 2: Re-run filename parser server-side
@@ -142,7 +201,12 @@ export const POST = withApiHandler(async (req: Request) => {
       issuePurpose,
       status: DocumentStatus.PENDING,
       watermarkStatus,
-      metadata,
+      metadata: {
+        ...metadata,
+        detectedMimeType: validationResult.detectedMimeType,
+        detectedExtension: validationResult.detectedExtension,
+        hashValidated: true,
+      },
     },
   })
 
