@@ -1,0 +1,22 @@
+{
+  "name": "@docuroute/emails",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-email/components": "^0.0.26",
+    "@react-email/render": "^1.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-email": "^5.2.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "typescript": "^5"
+  }
+}

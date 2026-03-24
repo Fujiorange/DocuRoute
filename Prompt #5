@@ -1,0 +1,909 @@
+## PROMPT 5 — Core Infrastructure Files
+
+```
+Generate all core infrastructure files.
+RULE: packages/core and packages/db — ZERO imports from next, react, react-dom.
+These files are used by both apps/web and apps/worker.
+
+--- FILE 1: packages/types/src/index.ts ---
+
+/**
+ * AUTHORIZATION MODEL: Hybrid PBAC + System Roles
+ *
+ * All permission checks use the Permission enum — never role name strings.
+ *
+ * How resolution works:
+ *   1. User has a roleId (FK to Role table)
+ *   2. Role has either:
+ *      a. systemRoleKey: keyof typeof SYSTEM_ROLE_PERMISSIONS — immutable system role
+ *      b. permissions: Permission[] — custom role defined by the company
+ *   3. requirePermission() resolves the user's effective permissions and checks
+ *
+ * Why system roles exist alongside custom roles:
+ *   ISO 9001 and classification society (DNV, ABS, BV) audits require named,
+ *   accountable roles in the quality management system. "Section 4 Foreman with
+ *   APPROVE_WORKFLOW permission" does not satisfy an ISO audit.
+ *   "Document Controller approved revision B" does.
+ *   System roles provide compliance traceability.
+ *   Custom roles provide organisational flexibility.
+ *   Both are mandatory.
+ */
+
+// ─── Permission enum (Pillar 1 — the atomic actions) ─────────────────────────
+
+export enum Permission {
+  // Document operations
+  UPLOAD_DOCUMENT        = 'UPLOAD_DOCUMENT',
+  VIEW_DOCUMENT          = 'VIEW_DOCUMENT',
+  DOWNLOAD_DOCUMENT      = 'DOWNLOAD_DOCUMENT',
+  DELETE_DOCUMENT        = 'DELETE_DOCUMENT',
+  ARCHIVE_DOCUMENT       = 'ARCHIVE_DOCUMENT',
+  HARD_PURGE_DOCUMENT    = 'HARD_PURGE_DOCUMENT',
+
+  // Metadata and naming
+  EDIT_DOCUMENT_METADATA = 'EDIT_DOCUMENT_METADATA',
+  VALIDATE_NAMING_MASK   = 'VALIDATE_NAMING_MASK',
+  CONFIGURE_NAMING_MASK  = 'CONFIGURE_NAMING_MASK',
+
+  // MDR and bulk operations
+  IMPORT_MDR             = 'IMPORT_MDR',
+  BULK_OPERATION         = 'BULK_OPERATION',
+  UNDO_BULK_OPERATION    = 'UNDO_BULK_OPERATION',
+
+  // Workflow
+  START_WORKFLOW         = 'START_WORKFLOW',
+  APPROVE_WORKFLOW       = 'APPROVE_WORKFLOW',
+  REJECT_WORKFLOW        = 'REJECT_WORKFLOW',
+  FORCE_UNLOCK_WORKFLOW  = 'FORCE_UNLOCK_WORKFLOW',
+  MANAGE_WORKFLOW_TEMPLATES = 'MANAGE_WORKFLOW_TEMPLATES',
+
+  // Transmittals
+  CREATE_TRANSMITTAL     = 'CREATE_TRANSMITTAL',
+  SEND_TRANSMITTAL       = 'SEND_TRANSMITTAL',
+  VIEW_TRANSMITTAL       = 'VIEW_TRANSMITTAL',
+
+  // Users and roles
+  INVITE_USERS           = 'INVITE_USERS',
+  MANAGE_USERS           = 'MANAGE_USERS',
+  DEACTIVATE_USERS       = 'DEACTIVATE_USERS',
+  MANAGE_CUSTOM_ROLES    = 'MANAGE_CUSTOM_ROLES',
+
+  // Legal and compliance
+  PLACE_LEGAL_HOLD       = 'PLACE_LEGAL_HOLD',
+  LIFT_LEGAL_HOLD        = 'LIFT_LEGAL_HOLD',
+  BYPASS_LEGAL_HOLD      = 'BYPASS_LEGAL_HOLD',    // COMPANY_OWNER only
+  CONFIGURE_RETENTION    = 'CONFIGURE_RETENTION',
+  VIEW_AUDIT_LOG         = 'VIEW_AUDIT_LOG',
+  EXPORT_AUDIT_VAULT     = 'EXPORT_AUDIT_VAULT',
+  MANAGE_LEGAL_HOLDS     = 'MANAGE_LEGAL_HOLDS',
+
+  // Security and identity
+  CONFIGURE_SSO          = 'CONFIGURE_SSO',
+  MANAGE_SCIM            = 'MANAGE_SCIM',
+  CREATE_API_KEY         = 'CREATE_API_KEY',
+  REVOKE_API_KEY         = 'REVOKE_API_KEY',
+  MANAGE_SERVICE_ACCOUNTS = 'MANAGE_SERVICE_ACCOUNTS',
+
+  // Billing and ownership
+  MANAGE_BILLING         = 'MANAGE_BILLING',
+  TRANSFER_OWNERSHIP     = 'TRANSFER_OWNERSHIP',
+  CONFIGURE_SUCCESSION   = 'CONFIGURE_SUCCESSION',
+
+  // Platform (PLATFORM_ADMIN only — never assignable to custom roles)
+  PLATFORM_ADMIN_ACCESS  = 'PLATFORM_ADMIN_ACCESS',
+  EMERGENCY_TRANSFER     = 'EMERGENCY_TRANSFER',
+}
+
+// ─── System role permission sets ─────────────────────────────────────────────
+
+/**
+ * SYSTEM_ROLE_PERMISSIONS defines the immutable permission sets for system roles.
+ * These cannot be changed by any company owner or admin.
+ * They are the compliance-traceable roles required for ISO 9001 quality systems.
+ */
+export const SYSTEM_ROLE_PERMISSIONS: Record<string, Permission[]> = {
+  PLATFORM_ADMIN: [
+    Permission.PLATFORM_ADMIN_ACCESS,
+    Permission.EMERGENCY_TRANSFER,
+    Permission.VIEW_AUDIT_LOG,
+    Permission.EXPORT_AUDIT_VAULT,
+  ],
+  COMPANY_OWNER: [
+    // All permissions except platform-only
+    ...Object.values(Permission).filter(p =>
+      p !== Permission.PLATFORM_ADMIN_ACCESS &&
+      p !== Permission.EMERGENCY_TRANSFER
+    ),
+  ],
+  COMPANY_ADMIN: [
+    Permission.INVITE_USERS, Permission.MANAGE_USERS, Permission.DEACTIVATE_USERS,
+    Permission.MANAGE_CUSTOM_ROLES,
+    Permission.UPLOAD_DOCUMENT, Permission.VIEW_DOCUMENT, Permission.DOWNLOAD_DOCUMENT,
+    Permission.DELETE_DOCUMENT, Permission.ARCHIVE_DOCUMENT,
+    Permission.EDIT_DOCUMENT_METADATA, Permission.BULK_OPERATION,
+    Permission.UNDO_BULK_OPERATION, Permission.IMPORT_MDR,
+    Permission.START_WORKFLOW, Permission.APPROVE_WORKFLOW, Permission.REJECT_WORKFLOW,
+    Permission.FORCE_UNLOCK_WORKFLOW, Permission.MANAGE_WORKFLOW_TEMPLATES,
+    Permission.CREATE_TRANSMITTAL, Permission.SEND_TRANSMITTAL, Permission.VIEW_TRANSMITTAL,
+    Permission.VIEW_AUDIT_LOG, Permission.MANAGE_BILLING,
+    Permission.CONFIGURE_NAMING_MASK,
+  ],
+  DOCUMENT_CONTROLLER: [
+    Permission.UPLOAD_DOCUMENT, Permission.VIEW_DOCUMENT, Permission.DOWNLOAD_DOCUMENT,
+    Permission.DELETE_DOCUMENT, Permission.ARCHIVE_DOCUMENT, Permission.UNDO_BULK_OPERATION,
+    Permission.EDIT_DOCUMENT_METADATA, Permission.VALIDATE_NAMING_MASK,
+    Permission.BULK_OPERATION, Permission.IMPORT_MDR,
+    Permission.START_WORKFLOW, Permission.FORCE_UNLOCK_WORKFLOW,
+    Permission.CREATE_TRANSMITTAL, Permission.SEND_TRANSMITTAL, Permission.VIEW_TRANSMITTAL,
+    Permission.PLACE_LEGAL_HOLD,
+  ],
+  AUDITOR: [
+    Permission.VIEW_AUDIT_LOG, Permission.EXPORT_AUDIT_VAULT,
+    Permission.VIEW_DOCUMENT, Permission.VIEW_TRANSMITTAL,
+    // DOWNLOAD_DOCUMENT for AUDITOR is conditional: enabled per-project by SECURITY_ADMIN
+    // This is enforced in the view endpoint, not in this permission set
+  ],
+  BILLING_CONTACT: [
+    Permission.MANAGE_BILLING, Permission.VIEW_DOCUMENT,
+  ],
+}
+
+/**
+ * System role keys — these are the only roles that cannot be deleted or renamed.
+ * They are stored as Role records in the DB with isSystemRole: true.
+ */
+export const SYSTEM_ROLE_KEYS = [
+  'PLATFORM_ADMIN', 'COMPANY_OWNER', 'COMPANY_ADMIN',
+  'DOCUMENT_CONTROLLER', 'AUDITOR', 'BILLING_CONTACT',
+] as const
+export type SystemRoleKey = typeof SYSTEM_ROLE_KEYS[number]
+
+// ─── Industry enums ───────────────────────────────────────────────────────────
+
+export enum EngineeringDiscipline {
+  PIPING          = 'PIPING',
+  STRUCTURAL      = 'STRUCTURAL',
+  ELECTRICAL      = 'ELECTRICAL',
+  HVAC            = 'HVAC',
+  MECHANICAL      = 'MECHANICAL',
+  INSTRUMENTATION = 'INSTRUMENTATION',
+  CIVIL           = 'CIVIL',
+  ARCHITECTURAL   = 'ARCHITECTURAL',
+  PROCESS         = 'PROCESS',
+  SAFETY          = 'SAFETY',
+  MARINE          = 'MARINE',
+  GENERAL         = 'GENERAL',
+}
+
+export enum IssuePurpose {
+  FOR_INFORMATION  = 'FOR_INFORMATION',
+  FOR_TENDER       = 'FOR_TENDER',
+  FOR_REVIEW       = 'FOR_REVIEW',
+  FOR_APPROVAL     = 'FOR_APPROVAL',
+  FOR_CONSTRUCTION = 'FOR_CONSTRUCTION',
+  AS_BUILT         = 'AS_BUILT',
+  SUPERSEDED       = 'SUPERSEDED',
+  VOID             = 'VOID',
+}
+
+export const DEPARTMENT_SUGGESTIONS = [
+  'Quality Control',
+  'Health & Safety',
+  'Project Management',
+  'Structural Engineering',
+  'Site Operations',
+  'Marine Engineering',
+  'Mechanical Engineering',
+  'Electrical Engineering',
+  'Document Control',
+  'Procurement',
+  'Classification & Compliance',
+] as const
+
+export type QRVerificationStatus = {
+  isSafe: boolean
+  headline: string
+  headlineColour: 'green' | 'red' | 'amber' | 'blue'
+  documentCode: string
+  revisionCode: string
+  issuePurpose: IssuePurpose
+  status: DocumentStatus
+  discipline: EngineeringDiscipline
+  projectName: string
+  verifiedAt: string
+  latestRevisionCode?: string
+}
+
+export enum DocumentStatus {
+  PENDING          = 'PENDING',
+  ACTIVE           = 'ACTIVE',
+  SUPERSEDED       = 'SUPERSEDED',
+  DELETED          = 'DELETED',
+  QUARANTINED      = 'QUARANTINED',
+  ENCRYPTING       = 'ENCRYPTING',
+  PENDING_METADATA = 'PENDING_METADATA',
+  ARCHIVED         = 'ARCHIVED',
+}
+
+export enum VirusScanStatus  { PENDING = 'PENDING', CLEAN = 'CLEAN',
+  QUARANTINED = 'QUARANTINED', SKIPPED = 'SKIPPED' }
+export enum WatermarkStatus  { PENDING = 'PENDING', PROCESSING = 'PROCESSING',
+  COMPLETE = 'COMPLETE', FAILED = 'FAILED',
+  SKIPPED_TOO_LARGE = 'SKIPPED_TOO_LARGE', SKIPPED_ENCRYPTED = 'SKIPPED_ENCRYPTED' }
+export enum BulkOperationType { DELETE = 'DELETE', ARCHIVE = 'ARCHIVE',
+  MOVE_PROJECT = 'MOVE_PROJECT', CHANGE_STATUS = 'CHANGE_STATUS',
+  DOWNLOAD_ZIP = 'DOWNLOAD_ZIP' }
+export enum StagingStatus    { UNREVIEWED = 'UNREVIEWED',
+  CONFIRMED = 'CONFIRMED', REJECTED = 'REJECTED' }
+export enum DocumentRecordStatus { ACTIVE = 'ACTIVE', ARCHIVED = 'ARCHIVED' }
+export enum TransmittalReturnStatus {
+  PENDING_RETURN = 'PENDING_RETURN', APPROVED = 'APPROVED',
+  APPROVED_WITH_COMMENTS = 'APPROVED_WITH_COMMENTS',
+  REJECTED = 'REJECTED', FOR_INFO_ONLY = 'FOR_INFO_ONLY' }
+export enum PlanTier {
+  STARTER = 'STARTER', GROWTH = 'GROWTH', PROFESSIONAL = 'PROFESSIONAL',
+  SCALE = 'SCALE', CORE = 'CORE', PRO_MID = 'PRO_MID',
+  ENTERPRISE_MID = 'ENTERPRISE_MID', PILOT = 'PILOT' }
+export enum APIScope {
+  READ_PROJECT = 'READ_PROJECT', WRITE_DOCUMENT = 'WRITE_DOCUMENT',
+  READ_DOCUMENT = 'READ_DOCUMENT', READ_TRANSMITTAL = 'READ_TRANSMITTAL',
+  WRITE_TRANSMITTAL = 'WRITE_TRANSMITTAL', READ_AUDIT = 'READ_AUDIT' }
+export enum AuditAction {
+  USER_INVITED = 'USER_INVITED', USER_ROLE_CHANGED = 'USER_ROLE_CHANGED',
+  USER_DEACTIVATED = 'USER_DEACTIVATED', SESSION_STARTED = 'SESSION_STARTED',
+  SESSION_ENDED = 'SESSION_ENDED', DOCUMENT_UPLOADED = 'DOCUMENT_UPLOADED',
+  DOCUMENT_DELETED = 'DOCUMENT_DELETED', DOCUMENT_DOWNLOADED = 'DOCUMENT_DOWNLOADED',
+  DOCUMENT_QUARANTINED = 'DOCUMENT_QUARANTINED',
+  LEGAL_HOLD_PLACED = 'LEGAL_HOLD_PLACED', LEGAL_HOLD_LIFTED = 'LEGAL_HOLD_LIFTED',
+  BULK_OPERATION = 'BULK_OPERATION', OWNERSHIP_TRANSFERRED = 'OWNERSHIP_TRANSFERRED',
+  SSO_CONFIGURED = 'SSO_CONFIGURED', API_KEY_CREATED = 'API_KEY_CREATED',
+  API_KEY_REVOKED = 'API_KEY_REVOKED', PERMISSION_DENIED = 'PERMISSION_DENIED',
+  CONFLICT_RESOLVED = 'CONFLICT_RESOLVED', SCIM_OPERATION = 'SCIM_OPERATION',
+  CUSTOM_ROLE_CREATED = 'CUSTOM_ROLE_CREATED', CUSTOM_ROLE_UPDATED = 'CUSTOM_ROLE_UPDATED',
+  CUSTOM_ROLE_DELETED = 'CUSTOM_ROLE_DELETED',
+}
+export enum AuditVaultEventType {
+  SUPERSEDED_DOC_ACKNOWLEDGED = 'SUPERSEDED_DOC_ACKNOWLEDGED',
+  LEGAL_HOLD_PLACED = 'LEGAL_HOLD_PLACED', LEGAL_HOLD_LIFTED = 'LEGAL_HOLD_LIFTED',
+  DOCUMENT_PURGED = 'DOCUMENT_PURGED',
+  RETENTION_POLICY_TRIGGERED = 'RETENTION_POLICY_TRIGGERED',
+  OWNERSHIP_TRANSFERRED = 'OWNERSHIP_TRANSFERRED', BREAK_GLASS_ACCESS = 'BREAK_GLASS_ACCESS',
+  WORKFLOW_FORCE_UNLOCKED = 'WORKFLOW_FORCE_UNLOCKED', SSO_BYPASS_USED = 'SSO_BYPASS_USED',
+  CONFLICT_RESOLVED = 'CONFLICT_RESOLVED', BULK_OPERATION = 'BULK_OPERATION',
+  API_KEY_CREATED = 'API_KEY_CREATED', API_KEY_REVOKED = 'API_KEY_REVOKED',
+  TRANSMITTAL_RETURNED = 'TRANSMITTAL_RETURNED',
+  TRANSMITTAL_ACKNOWLEDGED = 'TRANSMITTAL_ACKNOWLEDGED',
+  CUSTOM_ROLE_PERMISSION_CHANGE = 'CUSTOM_ROLE_PERMISSION_CHANGE',
+}
+export enum NotificationType {
+  WORKFLOW_ACTION_REQUIRED = 'WORKFLOW_ACTION_REQUIRED',
+  WORKFLOW_COMPLETED = 'WORKFLOW_COMPLETED', WORKFLOW_REJECTED = 'WORKFLOW_REJECTED',
+  DOCUMENT_QUARANTINED = 'DOCUMENT_QUARANTINED',
+  LEGAL_HOLD_PLACED = 'LEGAL_HOLD_PLACED',
+  STORAGE_LIMIT_WARNING = 'STORAGE_LIMIT_WARNING',
+  TRANSMITTAL_ACKNOWLEDGED = 'TRANSMITTAL_ACKNOWLEDGED',
+  TRANSMITTAL_RETURNED = 'TRANSMITTAL_RETURNED', API_KEY_EXPIRING = 'API_KEY_EXPIRING',
+}
+
+export type WorkflowStage = {
+  stageNumber: number
+  name: string
+  type: 'REVIEW' | 'APPROVAL'
+  requiredPermission: Permission  // permission checked for action — NOT a role name string
+  requiredApprovals: number
+  allowReject: boolean
+  timeoutHours: number | null
+}
+
+export const STANDARD_WORKFLOW_TEMPLATES = [
+  {
+    name: 'Internal Review',
+    completedLabel: 'Approved for Issue',
+    stages: [
+      { stageNumber: 1, name: 'Technical Review', type: 'REVIEW',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: true, timeoutHours: 48 },
+      { stageNumber: 2, name: 'Document Controller Check', type: 'APPROVAL',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: true, timeoutHours: 24 },
+    ],
+  },
+  {
+    name: 'Client Approval',
+    completedLabel: 'Client Approved',
+    stages: [
+      { stageNumber: 1, name: 'Internal Pre-Check', type: 'REVIEW',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: true, timeoutHours: 24 },
+      { stageNumber: 2, name: 'Client Review', type: 'APPROVAL',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: true, timeoutHours: 168 },
+    ],
+  },
+  {
+    name: 'Construction Release',
+    completedLabel: 'Released for Construction',
+    stages: [
+      { stageNumber: 1, name: 'Engineering Sign-Off', type: 'APPROVAL',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: true, timeoutHours: 48 },
+      { stageNumber: 2, name: 'QA/QC Verification', type: 'APPROVAL',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: true, timeoutHours: 24 },
+      { stageNumber: 3, name: 'Document Controller Release', type: 'APPROVAL',
+        requiredPermission: Permission.APPROVE_WORKFLOW,
+        requiredApprovals: 1, allowReject: false, timeoutHours: 8 },
+    ],
+  },
+] as const
+
+export const PLAN_LIMITS: Record<PlanTier, { users: number, storageGB: number, price: number }> = {
+  STARTER:        { users: 10, storageGB: 500,  price: 200 },
+  GROWTH:         { users: 10, storageGB: 1000, price: 350 },
+  PROFESSIONAL:   { users: 10, storageGB: 2000, price: 600 },
+  SCALE:          { users: 25, storageGB: 2000, price: 850 },
+  CORE:           { users: 50, storageGB: 2000, price: 1200 },
+  PRO_MID:        { users: 50, storageGB: 4000, price: 1800 },
+  ENTERPRISE_MID: { users: 50, storageGB: 6000, price: 2400 },
+  PILOT:          { users: 15, storageGB: 1500, price: 1000 },
+}
+
+--- FILE 2: packages/db/prisma/schema.prisma ---
+
+Add these models to the empty datasource (full content, all fields, relations, indexes).
+
+IMPORTANT — AuditVault immutability trigger:
+After running the migration, execute this SQL in Supabase SQL Editor:
+
+  CREATE OR REPLACE FUNCTION prevent_audit_vault_mutation()
+  RETURNS TRIGGER AS $$
+  BEGIN
+    RAISE EXCEPTION 'AuditVaultEntry is INSERT ONLY. Tampering detected.';
+  END;
+  $$ LANGUAGE plpgsql;
+
+  CREATE TRIGGER audit_vault_immutable
+  BEFORE UPDATE OR DELETE ON "AuditVaultEntry"
+  FOR EACH ROW EXECUTE FUNCTION prevent_audit_vault_mutation();
+
+This trigger is the DB-level enforcement of immutability.
+The application-level promise "INSERT ONLY" means nothing without this trigger.
+Add the SQL as a comment block inside schema.prisma above the AuditVaultEntry model
+so it is never lost during migrations.
+
+model Role {
+  id            String    @id @default(cuid())
+  companyId     String
+  name          String
+  description   String?
+  isSystemRole  Boolean   @default(false)
+  systemRoleKey String?
+  permissions   String[]  // Permission enum values; ignored for system roles
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  company       Company   @relation(fields: [companyId], references: [id])
+  users         User[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isSystemRole])
+  // GIN index for permission queries — add via raw SQL after migration:
+  // CREATE INDEX idx_role_permissions ON "Role" USING GIN (permissions);
+  // Required by createNotificationsForPermission to avoid full-table scans.
+}
+
+model Company {
+  id                        String    @id @default(cuid())
+  name                      String
+  slug                      String    @unique
+  planTier                  String    @default("PILOT")
+  recycleBinRetentionDays   Int       @default(90)
+  transmittalTemplate       Json?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  roles                     Role[]
+  users                     User[]
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  name                String?
+  companyId           String
+  roleId              String
+  isActive            Boolean   @default(false)
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?
+  scimDeprovisioned   Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  company             Company   @relation(fields: [companyId], references: [id])
+  role                Role      @relation(fields: [roleId], references: [id])
+
+  @@index([companyId, roleId])
+  @@index([companyId, isActive])
+}
+
+// Minimal Project model — required for Document.projectId FK
+// Phase 2 adds full project management fields
+model Project {
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId])
+}
+
+// Minimal DocumentRevision model — required for QR verification route
+// Phase 2 extends this to full DocumentRecord/Revision split
+model DocumentRevision {
+  id            String    @id @default(cuid())
+  documentId    String
+  companyId     String
+  revisionCode  String
+  fileKey       String
+  fileSize      Int
+  sha256Hash    String
+  issuePurpose  String?   // IssuePurpose enum value
+  status        String    @default("CURRENT") // CURRENT | SUPERSEDED | DRAFT
+  watermarkStatus String  @default("PENDING") // WatermarkStatus enum value
+  watermarkFileKey String?
+  uploadedBy    String
+  createdAt     DateTime  @default(now())
+
+  @@index([documentId, status])
+  @@index([companyId])
+}
+
+model AuditLog {
+  id               String    @id @default(cuid())
+  companyId        String
+  userId           String?
+  action           String    // AuditAction enum value
+  resourceType     String?
+  resourceId       String?
+  ipAddress        String?
+  userAgent        String?
+  permissionsUsed  String[]  // Permission enum values used to authorise this action
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, action])
+}
+
+// /*
+//  * AuditVaultEntry — IMMUTABLE compliance log.
+//  * INSERT ONLY. The database trigger below enforces this at the DB level.
+//  * Application code must never call update() or delete() on this model.
+//  *
+//  * REQUIRED SQL — run in Supabase SQL Editor after every schema migration:
+//  *
+//  *   CREATE OR REPLACE FUNCTION prevent_audit_vault_mutation()
+//  *   RETURNS TRIGGER AS $$
+//  *   BEGIN
+//  *     RAISE EXCEPTION 'AuditVaultEntry is INSERT ONLY. Tampering detected.';
+//  *   END;
+//  *   $$ LANGUAGE plpgsql;
+//  *
+//  *   CREATE TRIGGER audit_vault_immutable
+//  *   BEFORE UPDATE OR DELETE ON "AuditVaultEntry"
+//  *   FOR EACH ROW EXECUTE FUNCTION prevent_audit_vault_mutation();
+//  *
+//  * Verify trigger is active:
+//  *   SELECT tgname FROM pg_trigger WHERE tgrelid = '"AuditVaultEntry"'::regclass;
+//  */
+model AuditVaultEntry {
+  id                  String    @id @default(cuid())
+  companyId           String
+  eventType           String    // AuditVaultEventType enum value
+  userId              String?
+  userEmail           String    // snapshot — never rely on FK for compliance
+  ipAddress           String?
+  userAgent           String?
+  permissionsUsed     String[]  // Permission[] that were verified before this event
+  metadata            Json?
+  documentFingerprint String?   // SHA-256 of document file at event time
+  hash                String    // SHA-256 integrity hash of this record
+  createdAt           DateTime  // Set explicitly by application — NOT @default(now())
+                                // Must match value used to compute hash field above
+
+  @@index([companyId, createdAt])
+  @@index([companyId, eventType])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  email       String
+  companyId   String
+  roleId      String    // FK to Role table — not a role name string
+  token       String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([token])
+  @@index([email, companyId])
+}
+
+model TransmittalCounter {
+  companyId String
+  year      Int
+  sequence  Int        @default(0)
+  @@id([companyId, year])
+}
+
+--- FILE 3: packages/db/src/client.ts ---
+Standard PrismaClient singleton.
+Export: prismaAdmin (raw PrismaClient)
+Comment: "Use only in auth routes, SCIM routes, KMS, and middleware.
+          Every usage must have a comment explaining why."
+
+--- FILE 4: packages/db/src/index.ts --- (Pillar 3 — dynamic multi-tenancy)
+
+/**
+ * getPrismaForCompany(companyId): Extended PrismaClient
+ *
+ * IMPORTANT — extended client caching:
+ * $extends() must NOT be called on every request — it creates a new object
+ * each call and causes GC pressure and memory leaks under concurrent load.
+ * The extended client for the shared DB path is cached in extendedClientCache
+ * keyed by companyId, exactly like the enterprise path.
+ *
+ * Resolution order:
+ *   1. Check process.env[`TENANT_DB_URL_${companyId}`]
+ *      If set: enterprise client — return isolated PrismaClient for that DB.
+ *   2. Otherwise: standard/pilot client — return cached extended PrismaClient
+ *      with Prisma Client Extension injecting companyId into every query.
+ *
+ * Both enterprise and shared clients are cached in module-level Maps.
+ * Cache key: companyId. Never evicted — process restart clears cache.
+ *
+ * RULE: Use getPrismaForCompany in ALL API routes and cron jobs.
+ * RULE: Use prismaAdmin ONLY in auth routes, SCIM routes, middleware, kms.ts.
+ *       Every prismaAdmin usage must have a comment explaining why.
+ *
+ * TRANSACTION RULE — CRITICAL:
+ *   Interactive transactions ($transaction(async tx => { ... })) pass a raw
+ *   PrismaClient as `tx`. The companyId extension DOES NOT apply to `tx`.
+ *   In every transaction callback, pass companyId EXPLICITLY in all
+ *   data objects and where clauses. Never rely on the extension inside a tx.
+ */
+
+const tenantClientCache = new Map<string, PrismaClient>()
+const extendedClientCache = new Map<string, ReturnType<typeof sharedPrismaClient.$extends>>()
+
+export function getPrismaForCompany(companyId: string) {
+  // Check for enterprise dedicated DB
+  const tenantUrl = process.env[`TENANT_DB_URL_${companyId}`]
+  if (tenantUrl) {
+    const cached = tenantClientCache.get(companyId)
+    if (cached) return cached
+    const client = new PrismaClient({ datasources: { db: { url: tenantUrl } } })
+    tenantClientCache.set(companyId, client)
+    return client
+  }
+
+  // Shared DB — return cached extended client (NOT a new $extends() call each time)
+  const cached = extendedClientCache.get(companyId)
+  if (cached) return cached
+
+  const extended = sharedPrismaClient.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ args, query }) {
+          if (args.where !== undefined) {
+            args.where = { ...args.where, companyId }
+          }
+          if (args.data !== undefined && !Array.isArray(args.data)) {
+            args.data = { ...args.data, companyId }
+          }
+          return query(args)
+        }
+      }
+    }
+  })
+  extendedClientCache.set(companyId, extended)
+  return extended
+}
+
+export { prismaAdmin } from './client'
+
+--- FILE 5: packages/core/src/errors.ts ---
+export type ErrorCategory = 'SYSTEM_ERROR' | 'COMPLIANCE_VIOLATION'
+
+export class DocuRouteError extends Error {
+  constructor(
+    public code: string,
+    public message: string,
+    public statusCode: number,
+    public category: ErrorCategory = 'SYSTEM_ERROR',
+    public metadata?: object
+  ) { super(message) }
+}
+
+/**
+ * COMPLIANCE_VIOLATION errors trigger an immediate AuditVaultEntry
+ * when caught by withApiHandler.
+ *
+ * SYSTEM_ERROR: infrastructure failure — IT problem.
+ * COMPLIANCE_VIOLATION: permission/regulatory boundary crossed — legal problem.
+ */
+
+Export these factory functions:
+notFound(resource)           → SYSTEM_ERROR, 404
+forbidden(operation)         → COMPLIANCE_VIOLATION, 403
+unauthorized()               → COMPLIANCE_VIOLATION, 401
+validationError(field, msg)  → SYSTEM_ERROR, 422
+legalHoldActive(holdIds)     → COMPLIANCE_VIOLATION, 409
+transmittalLinked(...)       → COMPLIANCE_VIOLATION, 409
+seatLimitReached(limit, cur) → SYSTEM_ERROR, 402
+rateLimitExceeded(retryAfter)→ SYSTEM_ERROR, 429
+undoWindowExpired()          → SYSTEM_ERROR, 410
+complianceViolation(code, message, metadata?)
+  → COMPLIANCE_VIOLATION, 403
+
+--- FILE 6: packages/core/src/utils.ts ---
+cn(), formatDate(), generateSlug(), hashSHA256(),
+truncate(), isValidEmail(), formatBytes(), getParserConfidenceLevel()
+
+isDocumentSafeForConstruction(status: DocumentStatus, issuePurpose: IssuePurpose): boolean
+/**
+ * Core safety predicate for QR verification.
+ * SAFE only when: status === ACTIVE AND issuePurpose === FOR_CONSTRUCTION.
+ * Any other combination is unsafe. Non-negotiable.
+ */
+return status === DocumentStatus.ACTIVE && issuePurpose === IssuePurpose.FOR_CONSTRUCTION
+
+--- FILE 7: packages/core/src/audit.ts ---
+logAuditEvent(params: {
+  userId?: string, companyId: string,
+  action: AuditAction, resourceType?: string, resourceId?: string,
+  ipAddress?: string, userAgent?: string,
+  permissionsUsed?: Permission[],
+  metadata?: object
+}): Promise<void>
+INSERT only. Never throws. No Next.js imports.
+
+--- FILE 8: packages/core/src/audit-vault.ts ---
+
+/**
+ * HASH COMPUTATION — IMPORTANT:
+ * The hash is computed over a createdAt value that must be set by the caller
+ * and passed explicitly to the INSERT. Do NOT use @default(now()) on
+ * AuditVaultEntry.createdAt — the DB clock and the application clock differ
+ * by milliseconds, making the hash non-reproducible.
+ *
+ * Pattern:
+ *   const createdAt = new Date()
+ *   const hash = SHA-256(companyId + eventType + userId + createdAt.toISOString() + JSON.stringify(metadata))
+ *   prisma.auditVaultEntry.create({ data: { ...fields, createdAt, hash } })
+ *
+ * This ensures verifyVaultIntegrity() can reproduce and verify the hash.
+ */
+
+writeVaultEntry(params: {
+  companyId: string, eventType: AuditVaultEventType,
+  userId: string | null, userEmail: string,
+  ipAddress?: string, userAgent?: string,
+  permissionsUsed?: Permission[],
+  metadata?: object,
+  documentFingerprint?: string,
+}): Promise<void>
+  const createdAt = new Date()
+  hash = SHA-256(companyId + eventType + userId + createdAt.toISOString() + JSON.stringify(metadata))
+  INSERT with explicit createdAt (not @default). Never throws. No Next.js imports.
+
+verifyVaultIntegrity(companyId, startDate, endDate):
+  { valid: boolean, tampered: string[] }
+  Re-computes hash for each entry using stored createdAt.
+  Returns tampered IDs where computed hash !== stored hash.
+
+--- FILE 9: packages/core/src/qr-verification.ts ---
+
+generateVerificationQRCode(documentId, revisionId): Promise<string>
+  Uses qrcode package (CommonJS require for watermark-child.js compatibility)
+  Error correction: 'H'
+  Size: 200x200px
+  Returns: base64 PNG data URI
+
+buildVerificationStatus(document, revision, project): QRVerificationStatus
+  Calls isDocumentSafeForConstruction() from utils.ts
+
+--- FILE 10: apps/worker/src/scripts/watermark-child.js ---
+
+/**
+ * CommonJS module. Executed as a workerpool worker.
+ * EXPORT PATTERN: module.exports = { watermarkPDF }
+ * NOT process.on('message') — workerpool uses the task export pattern.
+ *
+ * CRITICAL — cross-package require at runtime:
+ * This file is NOT compiled by tsc (it is CommonJS, copied as-is to dist/).
+ * Do NOT require('../../../packages/core/src/qr-verification') —
+ * that relative path resolves in source but breaks from dist/scripts/.
+ *
+ * Instead: inline the QR generation logic directly using require('qrcode').
+ * This eliminates the cross-package path dependency entirely.
+ *
+ * Memory: pdf-lib requires the full file in memory (no streaming API).
+ * Each pool slot is capped at --max-old-space-size=512 by watermark.ts.
+ * OOM kills only this slot — workerpool restarts it. Main process unaffected.
+ *
+ * WATERMARK SIZE LIMIT: 200MB (MAX_WATERMARK_SIZE_BYTES in watermark.ts).
+ * Upload limit is 500MB. Files 200–500MB will be SKIPPED_TOO_LARGE.
+ * Caller (upload confirm route) must warn the user at upload time if
+ * issuePurpose === FOR_CONSTRUCTION and fileSize > 200MB.
+ */
+
+const qrcode = require('qrcode')  // direct require — no cross-package path
+
+async function generateQRCodeInline(documentId, revisionId) {
+  const baseUrl = process.env.QR_VERIFICATION_BASE_URL || 'https://docuroute.io'
+  const url = `${baseUrl}/verify/${documentId}?rev=${revisionId}`
+  return qrcode.toDataURL(url, { errorCorrectionLevel: 'H', width: 200 })
+}
+
+async function watermarkPDF({ inputBase64, latestRevisionCode, documentId, revisionId }) {
+  // Load PDF
+  // For every page: add SUPERSEDED watermark text (48pt, red, 45°, tiled)
+  //                 add QR code bottom-right (140×140px)
+  //                 add "Scan to verify" text below QR (8pt)
+  // return { success: true, buffer: result.toString('base64') }
+  // catch encrypted: return { success: false, reason: 'ENCRYPTED' }
+  // catch other: return { success: false, reason: 'PROCESSING_ERROR', error: err.message }
+}
+
+module.exports = { watermarkPDF }
+
+--- FILE 11: packages/core/src/watermark.ts --- (Pillar 2 — workerpool orchestration)
+
+/**
+ * POOL_SIZE = 2, MAX_WORKER_MEMORY_MB = 512
+ * MAX_WATERMARK_SIZE_BYTES = 200MB (not 500MB — matches memory budget)
+ *
+ * Files > MAX_WATERMARK_SIZE_BYTES: return { watermarkApplied: false, reason: 'FILE_TOO_LARGE' }
+ * The upload/confirm route MUST check this limit and warn the user when
+ * issuePurpose === FOR_CONSTRUCTION — a FOR_CONSTRUCTION drawing without
+ * a QR code is a field safety gap.
+ *
+ * Pool is a module-level singleton — created once, reused across all requests.
+ * Terminated gracefully in process crash handlers (index.ts).
+ */
+
+pool = workerpool.pool(path.join(__dirname, '../scripts/watermark-child.js'), {
+  maxWorkers: POOL_SIZE,
+  workerType: 'process',
+  forkOpts: { execArgv: [`--max-old-space-size=${MAX_WORKER_MEMORY_MB}`] },
+  timeout: 60_000,
+})
+
+watermarkInChildProcess(inputBuffer, latestRevisionCode, documentId, revisionId): Promise<Buffer>
+getCachedWatermark(fileKey): Promise<Buffer | null>
+saveCachedWatermark(fileKey, buffer): Promise<void>
+  R2 key: watermarked/{fileKey}
+
+--- FILE 12: apps/worker/src/workers/watermark.worker.ts ---
+BullMQ Worker, queue 'watermark', concurrency 2
+Rate limiter: max 10 jobs / 60s
+3 attempts, exponential backoff
+removeOnComplete: 100, removeOnFail: 500
+On complete: update watermarkStatus COMPLETE, set watermarkFileKey
+On all retries failed: watermarkStatus FAILED, email DOCUMENT_CONTROLLER
+Failed queue > 10: alert PLATFORM_ADMIN_EMAIL
+
+--- FILE 13: apps/worker/src/workers/scim.worker.ts ---
+BullMQ Worker, queue 'scim-user-[userId]', concurrency 1 per queue
+
+--- FILE 14: apps/worker/src/index.ts ---
+Start watermark + SCIM workers
+HTTP health endpoint on port 3001:
+  GET /health → { status, uptime, queues, pool: { size, utilization } }
+Global crash handlers:
+  process.on('uncaughtException') + process.on('unhandledRejection'):
+    await pool?.terminate()
+    process.exit(1)
+SIGTERM: graceful close workers + terminate pool
+
+--- FILE 15: apps/web/src/lib/auth.ts --- (stub for Phase 1 to complete)
+
+/**
+ * PBAC permission checks. All authorization uses Permission enum.
+ * Never check role names directly — always check permissions.
+ *
+ * Resolution:
+ *   role.isSystemRole → permissions from SYSTEM_ROLE_PERMISSIONS[role.systemRoleKey]
+ *   !role.isSystemRole → permissions from role.permissions[] stored in DB
+ *
+ * TRANSACTION RULE — CRITICAL:
+ *   requireLivePermission calls prismaAdmin directly (not via getPrismaForCompany).
+ *   This is intentional — permission checks during sensitive operations must
+ *   read the live, unfiltered user record.
+ *   Comment every prismaAdmin usage in this file.
+ *
+ * AUTH LIBRARY VERSION:
+ *   Uses next-auth stable v5. Never pin to a beta version.
+ *   Verify: pnpm list --filter web next-auth → must NOT contain "beta".
+ */
+
+type ResolvedUser = {
+  userId: string, companyId: string,
+  permissions: Permission[],
+  systemRoleKey?: SystemRoleKey,
+  roleName: string
+}
+
+resolvePermissions(roleId: string): Promise<Permission[]>
+  // Uses prismaAdmin: resolvePermissions is called during session creation
+  // and needs to look up a Role by ID without companyId filter.
+  if role.isSystemRole: return SYSTEM_ROLE_PERMISSIONS[role.systemRoleKey as SystemRoleKey]
+  else: return role.permissions as Permission[]
+
+requirePermission(session, allowed: Permission[]): void
+  throw forbidden() if no overlap with session.permissions
+
+requirePermissions(session, required: Permission[]): void
+  throw forbidden() if any required permission missing
+
+requireLivePermission(session, allowed: Permission[], operation: string): Promise<void>
+  // Uses prismaAdmin: fetches live user record across all companies.
+  Fetch User + Role fresh from DB via prismaAdmin
+  Check: isActive, companyId matches session.companyId
+  Check: permission intersection with allowed
+  Throw 401 if user inactive or companyId mismatch (JWT tampering detection)
+  Throw 403 if permission not in allowed
+  Log PERMISSION_DENIED to AuditLog on 403
+    permissionsUsed: allowed, metadata: { operation, allowed, actual }
+
+withApiHandler(handler): wraps route, catches DocuRouteError
+  COMPLIANCE_VIOLATION errors: also trigger writeVaultEntry before returning
+  Never expose stack traces or DB details in response
+
+--- FILE 16: apps/web/src/lib/offline-db.ts --- (Pillar 4 — Dexie local mirror)
+
+import Dexie from 'dexie'
+
+interface OfflineDocumentMeta {
+  id: string, documentCode: string, title?: string,
+  discipline?: string, issuePurpose?: string,
+  status: string, revisionCode: string,
+  projectId: string, companyId: string,
+  syncedAt: Date
+}
+interface OfflineAction {
+  id?: number, type: string, payload: string,
+  createdAt: Date, status: string,
+  retryCount: number, lastAttemptAt: Date | null
+}
+
+class DocuRouteOfflineDB extends Dexie {
+  documents!: Dexie.Table<OfflineDocumentMeta, string>
+  actions!: Dexie.Table<OfflineAction, number>
+  constructor() {
+    super('docuroute-offline-v1')
+    this.version(1).stores({
+      documents: 'id, documentCode, projectId, companyId, status, syncedAt',
+      actions: '++id, type, status, createdAt',
+    })
+  }
+}
+// Guard: Dexie uses browser IndexedDB. Return null on server to prevent SSR crash.
+export const offlineDB = typeof window !== 'undefined' ? new DocuRouteOfflineDB() : null
+
+--- FILE 17: apps/web/src/components/offline/offline-banner.tsx ---
+
+'use client'
+// Listens to window online/offline events.
+// Pings /api/health every 30s to distinguish device offline vs server unreachable.
+// Shows amber banner when offline: "You are offline — changes will sync when connected"
+// Dismissible per session only (re-shows on next offline event)
+// Includes sync-status indicator
+
+Output: Full content of all 17 files with complete TypeScript.
+
+After completing this prompt, create:
+  docs/tests/P0P5_Test.md
+  docs/summaries/P0P5_Summary.md
+  Where Test is the detailed step-by-step guide on the test procedure for this prompt
+  and Summary is the summary of what is done in this prompt
+```

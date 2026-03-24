@@ -1,0 +1,32 @@
+{
+  "buildCommand": "pnpm --filter web build",
+  "outputDirectory": "apps/web/.next",
+  "installCommand": "pnpm install",
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/storage-meter",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/key-rotation",
+      "schedule": "0 4 * * 0"
+    },
+    {
+      "path": "/api/cron/ownership-transfer",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/key-expiry",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/watermark-cleanup",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/workflow-timeout",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

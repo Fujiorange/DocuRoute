@@ -1,0 +1,255 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Role {
+  id            String   @id @default(cuid())
+  companyId     String
+  name          String
+  description   String?
+  isSystemRole  Boolean  @default(false)
+  systemRoleKey String?
+  permissions   String[] // Permission enum values; ignored for system roles
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id])
+  users         User[]
+  // GIN index for permission queries — created in migration 20260323_performance_indexes
+  // Required by createNotificationsForPermission to avoid full-table scans.
+
+  @@unique([companyId, name])
+  @@index([companyId, isSystemRole])
+}
+
+model Company {
+  id                             String             @id @default(cuid())
+  name                           String
+  slug                           String             @unique
+  planTier                       String             @default("PILOT")
+  recycleBinRetentionDays        Int                @default(90)
+  bulkOperationUndoWindowMinutes Int                @default(30)
+  transmittalTemplate            Json?
+  // Feature flags for plan-gated capabilities.
+  // Expected shape: { "customRoles": boolean, "advancedWorkflows": boolean, "scim": boolean }
+  // Unset key = feature disabled. Never rely on absent key = enabled.
+  // Set at onboarding. Modifiable by PLATFORM_ADMIN only.
+  features                       Json?
+  // Per-company security policy overrides.
+  // Expected shape: { "mfaRequired": boolean, "sessionTimeoutMinutes": number }
+  // If null, system defaults apply.
+  securitySettings               Json?
+  createdAt                      DateTime           @default(now())
+  updatedAt                      DateTime           @updatedAt
+  roles                          Role[]
+  users                          User[]
+  projects                       Project[]
+  documents                      Document[]
+  documentRevisions              DocumentRevision[]
+  onboarding                     CompanyOnboarding?
+  notifications                  Notification[]
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  companyId         String
+  roleId            String
+  isActive          Boolean  @default(false)
+  mfaEnabled        Boolean  @default(false)
+  mfaSecret         String?
+  scimDeprovisioned Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  company           Company  @relation(fields: [companyId], references: [id])
+  role              Role     @relation(fields: [roleId], references: [id])
+
+  @@index([companyId, roleId])
+  @@index([companyId, isActive])
+}
+
+// Minimal Project model — required for Document.projectId FK
+// Phase 2 adds full project management fields
+model Project {
+  id        String     @id @default(cuid())
+  companyId String
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  company   Company    @relation(fields: [companyId], references: [id])
+  documents Document[]
+
+  @@index([companyId])
+}
+
+model Document {
+  id         String  @id @default(cuid())
+  companyId  String
+  projectId  String?
+  filename   String
+  fileKey    String
+  fileSize   Int
+  mimeType   String
+  sha256Hash String
+  uploadedBy String // userId
+
+  // Industry fields — required from day 1, not deferred to Phase 2.
+  // Field workers need discipline and issue purpose the moment a document is uploaded.
+  discipline   String? // EngineeringDiscipline enum value
+  issuePurpose String? // IssuePurpose enum value
+
+  status               String    @default("PENDING") // DocumentStatus enum value
+  virusScanStatus      String    @default("PENDING") // VirusScanStatus enum value
+  virusScanCompletedAt DateTime?
+  watermarkStatus      String    @default("PENDING") // WatermarkStatus enum value
+  metadata             Json?     // For { watermarkSkipped: true, reason, acknowledgedByUserId, acknowledgedAt }
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  company              Company   @relation(fields: [companyId], references: [id])
+  project              Project?  @relation(fields: [projectId], references: [id])
+  // pg_trgm GIN indexes for fuzzy search — created in migration 20260323_performance_indexes
+  // Required for fast document search (<500ms with 100,000+ documents)
+
+  @@index([companyId, status])
+  @@index([companyId, createdAt])
+  @@index([companyId, projectId])
+  @@index([projectId, status, createdAt])
+}
+
+// Minimal DocumentRevision model — required for QR verification route
+// Phase 2 extends this to full DocumentRecord/Revision split
+model DocumentRevision {
+  id               String   @id @default(cuid())
+  documentId       String
+  companyId        String
+  revisionCode     String
+  fileKey          String
+  fileSize         Int
+  sha256Hash       String
+  discipline       String? // EngineeringDiscipline enum value
+  issuePurpose     String? // IssuePurpose enum value
+  status           String   @default("CURRENT") // CURRENT | SUPERSEDED | DRAFT
+  watermarkStatus  String   @default("PENDING") // WatermarkStatus enum value
+  watermarkFileKey String?
+  uploadedBy       String
+  createdAt        DateTime @default(now())
+  company          Company  @relation(fields: [companyId], references: [id])
+
+  @@index([documentId, status])
+  @@index([companyId])
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  companyId       String
+  userId          String?
+  action          String // AuditAction enum value
+  resourceType    String?
+  resourceId      String?
+  ipAddress       String?
+  userAgent       String?
+  permissionsUsed String[] // Permission enum values used to authorise this action
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, action])
+}
+
+// AuditVaultEntry — IMMUTABLE compliance log.
+// INSERT ONLY. The database trigger below enforces this at the DB level.
+// Application code must never call update() or delete() on this model.
+//
+// REQUIRED SQL — run in Supabase SQL Editor after every schema migration:
+//
+//   CREATE OR REPLACE FUNCTION prevent_audit_vault_mutation()
+//   RETURNS TRIGGER AS $$
+//   BEGIN
+//     RAISE EXCEPTION 'AuditVaultEntry is INSERT ONLY. Tampering detected.';
+//   END;
+//   $$ LANGUAGE plpgsql;
+//
+//   CREATE TRIGGER audit_vault_immutable
+//   BEFORE UPDATE OR DELETE ON "AuditVaultEntry"
+//   FOR EACH ROW EXECUTE FUNCTION prevent_audit_vault_mutation();
+//
+// Verify trigger is active:
+//   SELECT tgname FROM pg_trigger WHERE tgrelid = '"AuditVaultEntry"'::regclass;
+model AuditVaultEntry {
+  id                  String   @id @default(cuid())
+  companyId           String
+  eventType           String // AuditVaultEventType enum value
+  userId              String?
+  userEmail           String // snapshot — never rely on FK for compliance
+  ipAddress           String?
+  userAgent           String?
+  permissionsUsed     String[] // Permission[] that were verified before this event
+  metadata            Json?
+  documentFingerprint String? // SHA-256 of document file at event time
+  hash                String // SHA-256 integrity hash of this record
+  createdAt           DateTime // Set explicitly by application — NOT @default(now())
+  // Must match value used to compute hash field above
+
+  @@index([companyId, createdAt])
+  @@index([companyId, eventType])
+}
+
+model Invitation {
+  id         String    @id @default(cuid())
+  email      String
+  companyId  String
+  roleId     String // FK to Role table — not a role name string
+  token      String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([token])
+  @@index([email, companyId])
+}
+
+model TransmittalCounter {
+  companyId String
+  year      Int
+  sequence  Int    @default(0)
+
+  @@id([companyId, year])
+}
+
+model CompanyOnboarding {
+  id             String   @id @default(cuid())
+  companyId      String   @unique
+  completedSteps String[] @default([])
+  // Valid step values:
+  //   'FIRST_PROJECT_CREATED' | 'FIRST_DOCUMENT_UPLOADED' |
+  //   'FIRST_TEAM_MEMBER_INVITED' | 'NAMING_MASK_CONFIGURED' |
+  //   'FIRST_WORKFLOW_STARTED'
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  type      String // NotificationType enum value
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id])
+  // Composite index for unread notifications — created in migration 20260323_performance_indexes
+  // Optimizes common query: "Get unread notifications ordered by date"
+
+  @@index([userId, isRead])
+  @@index([companyId, createdAt])
+  @@index([userId, isRead, createdAt])
+}
