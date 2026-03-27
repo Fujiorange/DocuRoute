@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "turbo run dev",
+    "prebuild": "pnpm --filter @docuroute/db exec prisma generate",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",

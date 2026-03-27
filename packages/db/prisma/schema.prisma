@@ -55,6 +55,7 @@ model Company {
   notifications                  Notification[]
   equipmentTagFormats            EquipmentTagFormat[]
   bimWatchFolders                BIMWatchFolder[]
+  classSocietySubmissions        ClassSocietySubmission[]
 }
 
 model User {
@@ -85,10 +86,11 @@ model Project {
   tagFormatId    String?             // Optional override of company default tag format
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
-  company        Company             @relation(fields: [companyId], references: [id])
-  tagFormat      EquipmentTagFormat? @relation(fields: [tagFormatId], references: [id])
-  documents      Document[]
-  bimWatchFolder BIMWatchFolder?
+  company                 Company                  @relation(fields: [companyId], references: [id])
+  tagFormat               EquipmentTagFormat?      @relation(fields: [tagFormatId], references: [id])
+  documents               Document[]
+  bimWatchFolder          BIMWatchFolder?
+  classSocietySubmissions ClassSocietySubmission[]
 
   @@index([companyId])
   @@index([tagFormatId])
@@ -296,4 +298,39 @@ model BIMWatchFolder {
   @@unique([companyId, folderPath])
   @@index([companyId, enabled])
   @@index([enabled, lastPolledAt]) // For cron job polling
+}
+
+// Classification Society Submission - Tracks package submissions to ABS, DNV, LR, BV
+// Phase 3 ready: Extensible for API submission and webhook status updates
+model ClassSocietySubmission {
+  id                      String    @id @default(cuid())
+  companyId               String
+  projectId               String?
+  societyCode             String    // 'ABS', 'DNV', 'LR', 'BV'
+  packageTitle            String
+  submissionType          String    // 'INITIAL_APPROVAL', 'REVISION', 'AS_BUILT'
+  status                  String    @default("DRAFT") // 'DRAFT', 'MANUALLY_SUBMITTED', 'CONFIRMED', 'REJECTED'
+  documentIds             String[]  // Array of document IDs in this package
+  pdfPackageKey           String?   // R2 key for merged PDF
+  coverLetterKey          String?   // R2 key for cover letter
+  zipPackageKey           String?   // R2 key for full ZIP package
+  generatedAt             DateTime?
+  downloadedAt            DateTime?
+  manuallySubmittedAt     DateTime?
+  classReferenceNumber    String?   // Reference number from society (e.g., "ABS-2026-00123")
+  // Webhook tracking fields
+  webhookReceivedAt       DateTime?
+  webhookPayload          Json?
+  lastStatusCheckAt       DateTime?
+  statusCheckCount        Int       @default(0)
+  metadata                Json?     // Extensible metadata for society-specific fields
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  company                 Company   @relation(fields: [companyId], references: [id])
+  project                 Project?  @relation(fields: [projectId], references: [id])
+
+  @@index([companyId, status])
+  @@index([companyId, societyCode])
+  @@index([status, lastStatusCheckAt]) // For status polling cron job
+  @@index([classReferenceNumber]) // For webhook lookups
 }

@@ -30,7 +30,10 @@ services:
     # CRITICAL: Standard plan (2GB RAM) is the minimum for BullMQ worker
     # Handles queue management, database operations, and API calls to pdf-worker
     plan: standard
-    buildCommand: pnpm install && pnpm --filter @docuroute/worker build
+    buildCommand: |
+      pnpm install
+      pnpm --filter @docuroute/db exec prisma generate
+      pnpm --filter @docuroute/worker build
     startCommand: pnpm --filter @docuroute/worker start
     healthCheckPath: /health
     envVars:
@@ -80,7 +83,10 @@ services:
     runtime: node
     plan: starter
     schedule: "0 2 * * *"
-    buildCommand: pnpm install && pnpm --filter @docuroute/worker build
+    buildCommand: |
+      pnpm install
+      pnpm --filter @docuroute/db exec prisma generate
+      pnpm --filter @docuroute/worker build
     startCommand: node apps/worker/dist/crons/retention.js
     envVars:
       - key: NODE_OPTIONS
@@ -117,7 +123,10 @@ services:
     runtime: node
     plan: starter
     schedule: "0 3 * * *"
-    buildCommand: pnpm install && pnpm --filter @docuroute/worker build
+    buildCommand: |
+      pnpm install
+      pnpm --filter @docuroute/db exec prisma generate
+      pnpm --filter @docuroute/worker build
     startCommand: node apps/worker/dist/crons/vault-integrity.js
     envVars:
       - key: NODE_OPTIONS
