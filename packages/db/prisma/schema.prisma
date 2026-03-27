@@ -28,12 +28,12 @@ model Role {
 }
 
 model Company {
-  id                             String             @id @default(cuid())
+  id                             String                  @id @default(cuid())
   name                           String
-  slug                           String             @unique
-  planTier                       String             @default("PILOT")
-  recycleBinRetentionDays        Int                @default(90)
-  bulkOperationUndoWindowMinutes Int                @default(30)
+  slug                           String                  @unique
+  planTier                       String                  @default("PILOT")
+  recycleBinRetentionDays        Int                     @default(90)
+  bulkOperationUndoWindowMinutes Int                     @default(30)
   transmittalTemplate            Json?
   // Feature flags for plan-gated capabilities.
   // Expected shape: { "customRoles": boolean, "advancedWorkflows": boolean, "scim": boolean }
@@ -44,8 +44,8 @@ model Company {
   // Expected shape: { "mfaRequired": boolean, "sessionTimeoutMinutes": number }
   // If null, system defaults apply.
   securitySettings               Json?
-  createdAt                      DateTime           @default(now())
-  updatedAt                      DateTime           @updatedAt
+  createdAt                      DateTime                @default(now())
+  updatedAt                      DateTime                @updatedAt
   roles                          Role[]
   users                          User[]
   projects                       Project[]
@@ -53,6 +53,8 @@ model Company {
   documentRevisions              DocumentRevision[]
   onboarding                     CompanyOnboarding?
   notifications                  Notification[]
+  equipmentTagFormats            EquipmentTagFormat[]
+  bimWatchFolders                BIMWatchFolder[]
 }
 
 model User {
@@ -77,15 +79,19 @@ model User {
 // Minimal Project model — required for Document.projectId FK
 // Phase 2 adds full project management fields
 model Project {
-  id        String     @id @default(cuid())
-  companyId String
-  name      String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  company   Company    @relation(fields: [companyId], references: [id])
-  documents Document[]
+  id             String              @id @default(cuid())
+  companyId      String
+  name           String
+  tagFormatId    String?             // Optional override of company default tag format
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  company        Company             @relation(fields: [companyId], references: [id])
+  tagFormat      EquipmentTagFormat? @relation(fields: [tagFormatId], references: [id])
+  documents      Document[]
+  bimWatchFolder BIMWatchFolder?
 
   @@index([companyId])
+  @@index([tagFormatId])
 }
 
 model Document {
@@ -252,4 +258,42 @@ model Notification {
   @@index([userId, isRead])
   @@index([companyId, createdAt])
   @@index([userId, isRead, createdAt])
+}
+
+// Equipment Tag Format - Company-level naming conventions
+// Different projects (vessel vs FPSO) may use different tag formats
+model EquipmentTagFormat {
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String // e.g., "Standard DNV Format", "FPSO Format"
+  pattern     String // e.g., "{discipline}-{area}-{type}-{sequence}"
+  description String?
+  rules       Json? // Validation rules: { "discipline": { "pattern": "[A-Z]{2}", ... }, ... }
+  isDefault   Boolean   @default(false) // Company default format
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  company     Company   @relation(fields: [companyId], references: [id])
+  projects    Project[] // Projects using this format as override
+
+  @@unique([companyId, name])
+  @@index([companyId, isDefault])
+}
+
+// BIM Automated Watch Folder - Poll network folder for CSV imports
+model BIMWatchFolder {
+  id              String    @id @default(cuid())
+  companyId       String
+  projectId       String    @unique // One watch folder per project
+  folderPath      String // Network path or S3 URI (e.g., /mnt/bim-imports/project-123)
+  enabled         Boolean   @default(true)
+  lastPolledAt    DateTime?
+  lastImportedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  company         Company   @relation(fields: [companyId], references: [id])
+  project         Project   @relation(fields: [projectId], references: [id])
+
+  @@unique([companyId, folderPath])
+  @@index([companyId, enabled])
+  @@index([enabled, lastPolledAt]) // For cron job polling
 }
