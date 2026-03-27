@@ -1,12 +1,34 @@
 services:
+  # Go-based PDF watermarking microservice
+  - type: web
+    name: docuroute-pdf-worker
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./apps/pdf-worker/Dockerfile
+    dockerContext: ./apps/pdf-worker
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: PDF_WORKER_MEMORY_LIMIT_MB
+        value: 1024
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: QR_VERIFICATION_BASE_URL
+        sync: false
+
+  # BullMQ worker for background jobs
   - type: worker
     name: docuroute-worker
     runtime: node
-    # CRITICAL: Standard plan (2GB RAM) is the minimum.
-    # Custom roles mean unpredictable usage — a company can grant
-    # "Bulk Watermark" to any role they create. workerpool pools
-    # cap each PDF job at 512MB, but we need overhead for the pool
-    # manager, Redis connections, and concurrent SCIM operations.
+    # CRITICAL: Standard plan (2GB RAM) is the minimum for BullMQ worker
+    # Handles queue management, database operations, and API calls to pdf-worker
     plan: standard
     buildCommand: pnpm install && pnpm --filter @docuroute/worker build
     startCommand: pnpm --filter @docuroute/worker start
@@ -19,6 +41,9 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: PDF_WORKER_URL
+        # Internal URL to PDF worker service
+        value: http://docuroute-pdf-worker:8080
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY_ID

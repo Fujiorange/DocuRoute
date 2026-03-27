@@ -1,8 +1,18 @@
 /**
- * Permission Cache using Upstash Redis
+ * Permission Cache using Upstash Redis REST API
  *
  * ARCHITECTURE FIX (2026-03-23):
  * Addresses JWT cookie bloat by storing permissions in Redis instead of JWT.
+ *
+ * REDIS PROTOCOL USAGE:
+ * This module uses REST API (UPSTASH_REDIS_REST_URL) which is acceptable for
+ * permission caching because:
+ * 1. Permission lookups happen once per request (not repeatedly)
+ * 2. 10-30ms REST API latency is acceptable for auth middleware
+ * 3. Already cached in memory after first lookup
+ *
+ * NOTE: BullMQ workers use direct Redis protocol (REDIS_URL) for <5ms latency
+ * in job processing. See apps/worker/src/index.ts for validation.
  *
  * PROBLEM:
  * With 41 distinct permissions stored as array of strings in JWT:

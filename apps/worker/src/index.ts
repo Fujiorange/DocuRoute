@@ -3,7 +3,17 @@ import { watermarkWorker, watermarkQueue } from './workers/watermark.worker'
 import { createSCIMWorker } from './workers/scim.worker'
 import { terminatePool } from '@docuroute/core/src/watermark'
 
+// Validate required environment variables
+const REDIS_URL = process.env.REDIS_URL
+if (!REDIS_URL) {
+  console.error('CRITICAL: REDIS_URL environment variable must be set for BullMQ worker')
+  console.error('BullMQ requires direct Redis protocol connection (not REST API)')
+  console.error('Expected format: redis://[user[:password]@]host[:port][/database]')
+  process.exit(1)
+}
+
 console.log('DocuRoute Worker started')
+console.log(`Redis connection: ${REDIS_URL.replace(/:[^:@]+@/, ':****@')}`)
 
 // Health endpoint on port 3001
 const server = http.createServer((req, res) => {

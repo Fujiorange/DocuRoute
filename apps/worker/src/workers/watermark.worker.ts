@@ -1,8 +1,8 @@
 import { Worker, Queue } from 'bullmq'
 import { getPrismaForCompany } from '@docuroute/db'
-import { watermarkInChildProcess, saveCachedWatermark } from '@docuroute/core/src/watermark'
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+const PDF_WORKER_URL = process.env.PDF_WORKER_URL || 'http://localhost:8080'
 
 const watermarkQueue = new Queue('watermark', {
   connection: { url: REDIS_URL },
@@ -14,33 +14,44 @@ const watermarkWorker = new Worker(
     const { documentRevisionId, companyId, latestRevisionCode, documentId, fileKey } = job.data
 
     try {
-      // Fetch file from R2 (stub for now - implement R2 fetching in packages/core/src/r2.ts)
-      // const fileBuffer = await fetchFromR2(fileKey)
-      const fileBuffer = Buffer.from('') // Placeholder
+      // Call Go microservice for watermarking
+      const response = await fetch(`${PDF_WORKER_URL}/watermark`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileKey,
+          documentId,
+          revisionId: documentRevisionId,
+          revisionCode: latestRevisionCode,
+          issuePurpose: job.data.issuePurpose || 'UNKNOWN',
+          companyId,
+        }),
+        // Timeout for large files (5 minutes)
+        signal: AbortSignal.timeout(300000),
+      })
 
-      // Watermark in child process
-      const watermarkedBuffer = await watermarkInChildProcess(
-        fileBuffer,
-        latestRevisionCode,
-        documentId,
-        documentRevisionId
-      )
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`PDF worker failed: ${response.status} ${response.statusText} - ${errorText}`)
+      }
 
-      // Save to R2 cache
-      const watermarkFileKey = `watermarked/${fileKey}`
-      await saveCachedWatermark(watermarkFileKey, watermarkedBuffer)
+      const result = await response.json()
 
-      // Update database
+      if (!result.success) {
+        throw new Error(result.error || 'Watermarking failed')
+      }
+
+      // Update database with watermarked file key
       const prisma = getPrismaForCompany(companyId) as any
       await prisma.documentRevision.update({
         where: { id: documentRevisionId },
         data: {
           watermarkStatus: 'COMPLETE',
-          watermarkFileKey,
+          watermarkFileKey: result.watermarkedKey,
         },
       })
 
-      return { success: true, watermarkFileKey }
+      return { success: true, watermarkFileKey: result.watermarkedKey }
     } catch (error: any) {
       console.error('Watermark worker error:', error)
 
@@ -64,10 +75,10 @@ const watermarkWorker = new Worker(
   },
   {
     connection: { url: REDIS_URL },
-    concurrency: 2,
+    concurrency: 4, // Increased from 2 - Go service can handle more concurrency
     limiter: {
-      max: 10,
-      duration: 60_000, // 10 jobs per 60 seconds
+      max: 20, // Increased from 10 - better throughput with Go
+      duration: 60_000, // 20 jobs per 60 seconds
     },
     settings: {
       backoffStrategy: (attemptsMade) => {

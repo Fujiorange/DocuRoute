@@ -1,5 +1,14 @@
 /**
- * Rate limiting utilities using Upstash Redis
+ * Rate limiting utilities using Upstash Redis REST API
+ *
+ * IMPORTANT: This module uses the REST API for rate limiting operations.
+ * REST API is acceptable here because:
+ * 1. Rate limiting can tolerate 10-30ms latency
+ * 2. Not used in hot path (only on login, invite, etc.)
+ * 3. Simplifies infrastructure (no extra Redis connections)
+ *
+ * NOTE: BullMQ workers MUST use direct Redis protocol (REDIS_URL) for job
+ * processing to achieve <5ms latency. See apps/worker/src/index.ts for validation.
  *
  * Uses sliding window rate limiting for accurate rate control.
  */
@@ -7,7 +16,7 @@
 import { Redis } from '@upstash/redis'
 import { rateLimitExceeded } from './errors'
 
-// Lazy initialization  only create client if rate limiting is used
+// Lazy initialization — only create client if rate limiting is used
 let redis: Redis | null = null
 
 function getRedis(): Redis {
