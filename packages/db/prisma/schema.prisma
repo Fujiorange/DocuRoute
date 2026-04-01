@@ -89,15 +89,17 @@ model Project {
 }
 
 model Document {
-  id         String  @id @default(cuid())
-  companyId  String
-  projectId  String?
-  filename   String
-  fileKey    String
-  fileSize   Int
-  mimeType   String
-  sha256Hash String
-  uploadedBy String // userId
+  id           String  @id @default(cuid())
+  companyId    String
+  projectId    String?
+  documentCode String? // Document register code (e.g., "DWG-001", "SPEC-042")
+  title        String? // Document title for register view
+  filename     String
+  fileKey      String
+  fileSize     Int
+  mimeType     String
+  sha256Hash   String
+  uploadedBy   String  // userId
 
   // Industry fields — required from day 1, not deferred to Phase 2.
   // Field workers need discipline and issue purpose the moment a document is uploaded.
@@ -116,6 +118,7 @@ model Document {
   // pg_trgm GIN indexes for fuzzy search — created in migration 20260323_performance_indexes
   // Required for fast document search (<500ms with 100,000+ documents)
 
+  @@unique([projectId, documentCode])
   @@index([companyId, status])
   @@index([companyId, createdAt])
   @@index([companyId, projectId])
