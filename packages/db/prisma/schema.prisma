@@ -225,6 +225,58 @@ model TransmittalCounter {
   @@id([companyId, year])
 }
 
+model Transmittal {
+  id          String   @id @default(cuid())
+  companyId   String
+  number      String // Generated format: "TR-2026-001"
+  subject     String
+  message     String?
+  status      String   @default("DRAFT") // DRAFT | SENT | ACKNOWLEDGED | RETURNED
+  sentAt      DateTime?
+  expiresAt   DateTime? // Optional expiration for public access
+  createdBy   String // userId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  documents   TransmittalDocument[]
+  recipients  TransmittalRecipient[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, createdAt])
+}
+
+model TransmittalDocument {
+  id            String   @id @default(cuid())
+  transmittalId String
+  documentId    String
+  revisionId    String // LOCKED — never changes even if new revision uploaded
+  addedAt       DateTime @default(now())
+  transmittal   Transmittal @relation(fields: [transmittalId], references: [id], onDelete: Cascade)
+
+  @@unique([transmittalId, documentId])
+  @@index([transmittalId])
+  @@index([documentId])
+}
+
+model TransmittalRecipient {
+  id             String    @id @default(cuid())
+  transmittalId  String
+  email          String
+  name           String?
+  company        String?
+  token          String    @unique // For public access
+  status         String    @default("PENDING") // PENDING | VIEWED | ACKNOWLEDGED
+  viewedAt       DateTime?
+  acknowledgedAt DateTime?
+  message        String? // Acknowledgment message or return reason
+  createdAt      DateTime  @default(now())
+  transmittal    Transmittal @relation(fields: [transmittalId], references: [id], onDelete: Cascade)
+
+  @@index([transmittalId])
+  @@index([token])
+  @@index([email])
+}
+
 model CompanyOnboarding {
   id             String   @id @default(cuid())
   companyId      String   @unique
