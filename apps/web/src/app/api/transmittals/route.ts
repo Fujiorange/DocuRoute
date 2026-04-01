@@ -54,6 +54,20 @@ export const POST = withApiHandler(async (req: NextRequest) => {
   const currentYear = new Date().getFullYear()
 
   const transmittalData = await prisma.$transaction(async (tx) => {
+    // Get or create company transmittal config
+    let config = await tx.companyTransmittalConfig.findUnique({
+      where: { companyId: session.user.companyId },
+    })
+
+    if (!config) {
+      // Create default config if it doesn't exist
+      config = await tx.companyTransmittalConfig.create({
+        data: {
+          companyId: session.user.companyId,
+        },
+      })
+    }
+
     const counter = await tx.transmittalCounter.upsert({
       where: {
         companyId_year: {
@@ -71,7 +85,8 @@ export const POST = withApiHandler(async (req: NextRequest) => {
       },
     })
 
-    const transmittalNumber = `TR-${currentYear}-${String(counter.sequence).padStart(3, '0')}`
+    // Use company config for number format
+    const transmittalNumber = `${config.numberPrefix}-${currentYear}-${String(counter.sequence).padStart(config.numberPadding, '0')}`
 
     const documents = await tx.document.findMany({
       where: {

@@ -277,6 +277,20 @@ model TransmittalRecipient {
   @@index([email])
 }
 
+model CompanyTransmittalConfig {
+  id            String   @id @default(cuid())
+  companyId     String   @unique
+  numberPrefix  String   @default("TR") // e.g., "TR", "SHP", "BLD"
+  numberPadding Int      @default(3) // Number of digits: 001, 0001, etc.
+  columns       Json     @default("{\"documentCode\": {\"enabled\": true, \"label\": \"Document Code\", \"order\": 0}, \"title\": {\"enabled\": true, \"label\": \"Title\", \"order\": 1}, \"revisionCode\": {\"enabled\": true, \"label\": \"Revision\", \"order\": 2}, \"status\": {\"enabled\": false, \"label\": \"Status\", \"order\": 3}, \"discipline\": {\"enabled\": false, \"label\": \"Discipline\", \"order\": 4}}") // Column configuration
+  headerFields  Json     @default("{\"projectName\": {\"enabled\": false, \"label\": \"Project Name\"}, \"attentionTo\": {\"enabled\": false, \"label\": \"Attention To\"}, \"subject\": {\"enabled\": true, \"label\": \"Subject\"}}") // Header field configuration
+  footerText    String?  // Custom footer text for transmittals
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([companyId])
+}
+
 model CompanyOnboarding {
   id             String   @id @default(cuid())
   companyId      String   @unique
