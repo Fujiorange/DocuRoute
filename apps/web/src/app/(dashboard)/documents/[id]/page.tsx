@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { Permission } from '@docuroute/types'
 import { DocumentStatusBadge } from '@/components/documents/document-status-badge'
 import { DisciplineBadge } from '@/components/documents/discipline-badge'
+import { UploadRevisionButton } from '@/components/documents/upload-revision-button'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -76,32 +77,31 @@ export default function DocumentDetailPage() {
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
   const [loading, setLoading] = useState(true)
 
+  const fetchDocument = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/documents/' + documentId)
+
+      if (!res.ok) {
+        throw new Error('Failed to fetch document')
+      }
+
+      const data = await res.json()
+      setDocument(data.document)
+      setAuditLog(data.auditLog || [])
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to load document. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!documentId) return
-
-    const fetchDocument = async () => {
-      setLoading(true)
-      try {
-        const res = await fetch('/api/documents/' + documentId)
-
-        if (!res.ok) {
-          throw new Error('Failed to fetch document')
-        }
-
-        const data = await res.json()
-        setDocument(data.document)
-        setAuditLog(data.auditLog || [])
-      } catch (error) {
-        toast({
-          title: 'Error',
-          description: 'Failed to load document. Please try again.',
-          variant: 'destructive',
-        })
-      } finally {
-        setLoading(false)
-      }
-    }
-
     fetchDocument()
   }, [documentId])
 
@@ -214,8 +214,9 @@ export default function DocumentDetailPage() {
 
       {/* Revisions */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <CardTitle>Revision History</CardTitle>
+          <UploadRevisionButton documentId={documentId} onRevisionUploaded={fetchDocument} />
         </CardHeader>
         <CardContent>
           {document.revisions.length === 0 ? (
