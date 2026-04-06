@@ -958,202 +958,584 @@ wc -l apps/web/.env.local   # Should show 20+ lines
 
 ## Database Setup
 
-### 1. Enable PostgreSQL Extensions
-
-If using Supabase, go to **Database > Extensions** and enable:
-- `pg_trgm` (for fuzzy text search)
-
-If using self-hosted PostgreSQL:
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-```
-
-### 2. Generate Prisma Client
-
-```bash
-# From the root directory
-cd /home/runner/work/DocuRoute/DocuRoute
-
-# Generate Prisma client
-pnpm --filter @docuroute/db exec prisma generate
-```
-
-### 3. Run Database Migrations
-
-```bash
-# Run all migrations
-pnpm --filter @docuroute/db exec prisma migrate deploy
-```
-
-This will create all necessary tables and apply Row-Level Security policies.
-
-### 4. Verify Database Schema
-
-Check that these tables were created:
-- `Role` - System and custom roles
-- `Company` - Tenant companies
-- `User` - User accounts
-- `Project` - Projects within companies
-- `Document` - Document metadata
-- `DocumentRevision` - Document revisions (A, B, C, etc.)
-- `Transmittal` - Document transmittals
-- `AuditLog` - Immutable audit trail
-- `Notification` - User notifications
-- `CompanyOnboarding` - Onboarding state
-- `CompanyTransmittalConfig` - Transmittal configuration
+Now that environment variables are configured, let's set up the database structure. This involves enabling extensions, generating database client code, and running migrations to create tables.
 
 ---
 
-## External Services Setup
+### Step 1: Enable PostgreSQL Extensions
 
-### 1. Cloudflare R2 Setup
+**What are extensions?** PostgreSQL extensions add extra features to the database. DocuRoute needs `pg_trgm` for fast fuzzy text searching (helps you search documents by partial matches).
 
-1. **Create R2 Bucket:**
-   - Log in to Cloudflare Dashboard
-   - Navigate to **R2 Object Storage**
-   - Click **Create bucket**
-   - Name it (e.g., `docuroute-files`)
-   - Choose location
+#### If Using Supabase:
 
-2. **Generate API Token:**
-   - Go to **R2 > Manage R2 API Tokens**
-   - Click **Create API token**
-   - Permissions: **Object Read & Write**
-   - Note: `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`
+1. Log in to your Supabase dashboard
+2. Select your project
+3. Click **Database** in the left sidebar
+4. Click **Extensions**
+5. Search for `pg_trgm`
+6. Click the toggle to **enable** it
+7. Wait a few seconds for it to activate
 
-3. **Get Public URL:**
-   - The public URL format: `https://[account_id].r2.cloudflarestorage.com`
-   - Or set up custom domain in R2 bucket settings
+💡 **Tip:** You should see a green checkmark when it's enabled.
 
-### 2. Resend Email Setup
+#### If Using Self-Hosted PostgreSQL:
 
-1. **Sign up and verify domain:**
-   - Go to https://resend.com
-   - Add your domain
-   - Add DNS records (SPF, DKIM, DMARC)
-   - Wait for verification
+```bash
+# Connect to your database
+psql -U postgres -d your_database_name
 
-2. **Create API Key:**
-   - Go to **API Keys**
-   - Click **Create API Key**
-   - Copy the key to `RESEND_API_KEY`
+# Enable the extension
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-3. **Test Email:**
-   ```bash
-   curl -X POST https://api.resend.com/emails \
-     -H "Authorization: Bearer YOUR_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "from": "noreply@yourdomain.com",
-       "to": "test@example.com",
-       "subject": "Test",
-       "html": "<p>Test email</p>"
-     }'
-   ```
+# Verify it's installed
+\dx pg_trgm
 
-### 3. Upstash Redis Setup
+# Exit psql
+\q
+```
 
-1. **Create Database:**
-   - Go to https://upstash.com
-   - Click **Create Database**
-   - Choose region closest to your app
-   - Select **Pay as you go** or **Free**
+---
 
-2. **Get Connection Strings:**
-   - **For Rate Limiting:** Copy `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
-   - **For BullMQ:** Copy the Redis URL (format: `redis://default:password@host:6379`)
+### Step 2: Generate Prisma Client
 
-### 4. Stripe Setup (Optional)
+**What is Prisma?** Prisma is a database toolkit that DocuRoute uses. The Prisma Client is auto-generated TypeScript code that lets the app talk to the database safely.
 
-1. **Get Test Keys:**
-   - Go to https://dashboard.stripe.com/test/apikeys
-   - Copy **Publishable key** and **Secret key**
+**Why generate it?** The client code is based on your database schema and needs to be generated before you can run the app.
 
-2. **Configure Webhook:**
-   - Go to **Developers > Webhooks**
-   - Add endpoint: `https://yourdomain.com/api/webhooks/stripe`
-   - Select events: `checkout.session.completed`, `customer.subscription.*`
-   - Copy webhook secret to `STRIPE_WEBHOOK_SECRET`
+```bash
+# Navigate to the project root (if not already there)
+cd /path/to/DocuRoute
 
-### 5. VirusTotal Setup
+# Generate the Prisma client
+pnpm --filter @docuroute/db exec prisma generate
+```
 
-1. **Sign up:**
-   - Go to https://www.virustotal.com
-   - Create account
+**What's happening:**
+1. pnpm targets the `@docuroute/db` package
+2. Runs `prisma generate` inside that package
+3. Reads the schema from `packages/db/prisma/schema.prisma`
+4. Generates TypeScript code in `node_modules/@prisma/client`
 
-2. **Get API Key:**
-   - Go to **Profile > API Key**
-   - Copy key to `VIRUSTOTAL_API_KEY`
+**Expected output:**
+```
+✔ Generated Prisma Client (v5.x.x) to ./node_modules/@prisma/client in 123ms
+
+You can now start using Prisma Client in your code:
+
+import { PrismaClient } from '@prisma/client'
+const prisma = new PrismaClient()
+```
+
+⚠️ **If you get an error:** Make sure your `DATABASE_URL` in `.env.local` is correct and the database is accessible.
+
+---
+
+### Step 3: Run Database Migrations
+
+**What are migrations?** Migration files contain SQL commands to create/modify database tables and relationships. Think of them as a recipe for building your database structure.
+
+**Important:** This step creates ALL the tables, columns, indexes, and security policies that DocuRoute needs.
+
+```bash
+# Run all pending migrations
+pnpm --filter @docuroute/db exec prisma migrate deploy
+```
+
+**What's happening:**
+1. Prisma checks which migrations haven't been applied yet
+2. Executes SQL commands in order (creating tables, indexes, etc.)
+3. Records which migrations have been applied (in `_prisma_migrations` table)
+4. Sets up Row-Level Security (RLS) policies for multi-tenancy
+
+**Expected output:**
+```
+Applying migration `20260323_rls_multi_tenancy`
+Applying migration `20260401_add_documentcode_title`
+Applying migration `20260406_add_transmittal_config`
+...
+
+The following migrations have been applied:
+
+migrations/
+  └─ 20260323_rls_multi_tenancy/
+      └─ migration.sql
+  └─ 20260401_add_documentcode_title/
+      └─ migration.sql
+  ...
+
+All migrations have been successfully applied.
+```
+
+💡 **This might take 30-60 seconds** as it creates dozens of tables and indexes.
+
+⚠️ **Common Issues:**
+
+- **"Can't reach database server"** → Check your `DIRECT_URL` is correct and uses port `5432`
+- **"Database ... does not exist"** → Make sure you specified the correct database name in the connection string
+- **"Permission denied"** → Your database user needs CREATE TABLE permissions
+
+---
+
+### Step 4: Verify Database Schema
+
+Let's make sure all the tables were created successfully.
+
+#### Using Supabase (Recommended):
+
+1. Go to your Supabase dashboard
+2. Click **Table Editor** in the left sidebar
+3. You should see these tables:
+
+| Table Name | Purpose |
+|------------|---------|
+| `Role` | System and custom roles (COMPANY_OWNER, DOCUMENT_CONTROLLER, etc.) |
+| `Company` | Tenant companies (multi-tenancy) |
+| `User` | User accounts and authentication |
+| `UserCompany` | Links users to companies |
+| `Project` | Projects within companies |
+| `Document` | Document metadata (codes, titles, status) |
+| `DocumentRevision` | Document revisions (A, B, C, etc.) |
+| `Transmittal` | Document transmittals |
+| `TransmittalDocument` | Documents included in transmittals |
+| `AuditLog` | Immutable audit trail |
+| `Notification` | User notifications |
+| `CompanyOnboarding` | Onboarding progress |
+| `CompanyTransmittalConfig` | Transmittal configuration per company |
+| `ClassSocietySubmission` | Classification society submissions |
+| ... and others |
+
+#### Using psql (Command Line):
+
+```bash
+# Connect to database
+psql "postgresql://postgres:password@db.xxx.supabase.co:5432/postgres"
+
+# List all tables
+\dt
+
+# Check a specific table structure
+\d "Document"
+
+# Count rows (should be 0 for now)
+SELECT COUNT(*) FROM "Document";
+
+# Exit
+\q
+```
+
+**Expected result:** You should see 20-30 tables listed.
+
+---
+
+### Step 5: Verify Row-Level Security (Optional but Recommended)
+
+DocuRoute uses Row-Level Security (RLS) to enforce multi-tenancy (data isolation between companies).
+
+**Check if RLS is enabled:**
+
+```bash
+# Connect to database
+psql "your-direct-url-here"
+
+# Check RLS status on key tables
+SELECT schemaname, tablename, rowsecurity
+FROM pg_tables
+WHERE tablename IN ('Document', 'User', 'Project', 'Company');
+
+# You should see rowsecurity = true for all of them
+```
+
+**Expected output:**
+```
+ schemaname | tablename | rowsecurity
+------------+-----------+-------------
+ public     | Document  | t
+ public     | User      | t
+ public     | Project   | t
+ public     | Company   | t
+```
+
+💡 **What this means:** Each company can only see their own data. This is enforced at the database level for security.
+
+---
+
+### ✅ **Checkpoint: Database Setup Complete**
+
+Before continuing, verify:
+- ✅ `pg_trgm` extension enabled
+- ✅ Prisma client generated successfully
+- ✅ All migrations applied without errors
+- ✅ Tables visible in Supabase Table Editor (or via psql)
+- ✅ At least 20 tables exist (Role, Company, User, Document, etc.)
+- ✅ Row-Level Security enabled on main tables
+
+**Test database connection:**
+```bash
+# Quick test (should connect without errors)
+psql "your-DATABASE_URL-here" -c "SELECT 1;"
+
+# Should output:
+#  ?column?
+# ----------
+#         1
+```
+
+🎉 **Excellent!** Your database is ready. Let's run the application next!
 
 ---
 
 ## Running the Application
 
+You're almost there! Now it's time to start DocuRoute and see it in action.
+
+**What we'll run:**
+1. **Web Application** - The main Next.js app (frontend + API)
+2. **Worker** - Background processor for heavy tasks (PDF watermarking, emails, etc.)
+
+You can run both together (easiest) or separately (for debugging).
+
+---
+
 ### Development Mode
 
-You can run all services together or separately.
+#### Option 1: Run Everything Together (Recommended for Beginners)
 
-#### Option 1: Run Everything (Recommended)
-
-From the root directory:
+This is the easiest way to get started. One command runs both the web app and worker.
 
 ```bash
-# Run web app, worker, and build watchers
+# Make sure you're in the project root
+cd /path/to/DocuRoute
+
+# Start everything
 pnpm dev
 ```
 
-This starts:
-- **Web app** on http://localhost:3000
-- **Worker** (background jobs processor)
-- All package build watchers
+**What's happening:**
+- Turborepo starts all development servers in parallel
+- Web app starts on http://localhost:3000
+- Worker starts and connects to Redis for background jobs
+- Package build watchers start (auto-rebuild when you change code)
+- Hot reload is enabled (changes appear instantly in browser)
 
-#### Option 2: Run Services Separately
+**Expected output:**
+```
+• Packages in scope: @docuroute/core, @docuroute/db, @docuroute/emails, @docuroute/types, web, worker
+• Running dev in 6 packages
+• Remote caching disabled
+
+web:dev: > web@0.1.0 dev
+web:dev: > next dev
+web:dev:   ▲ Next.js 15.1.0
+web:dev:   - Local:        http://localhost:3000
+web:dev:   - Network:      http://192.168.1.x:3000
+
+worker:dev: > worker@0.1.0 dev
+worker:dev: > tsx watch src/index.ts
+worker:dev: ✓ Worker started successfully
+worker:dev: ✓ Connected to Redis
+worker:dev: ✓ Listening for jobs...
+```
+
+💡 **Keep this terminal open!** This is your development server. You'll see logs here as you use the app.
+
+**How to stop:** Press `Ctrl+C` in the terminal.
+
+---
+
+#### Option 2: Run Services Separately (For Debugging)
+
+If you need to see logs from each service separately or debug one at a time:
 
 **Terminal 1 - Web Application:**
 ```bash
+# Navigate to web app
 cd apps/web
+
+# Start the web app
 pnpm dev
 ```
 
-**Terminal 2 - Worker:**
+**Expected output:**
+```
+> web@0.1.0 dev
+> next dev
+
+  ▲ Next.js 15.1.0
+  - Local:        http://localhost:3000
+  - Environments: .env.local
+
+ ✓ Ready in 2.3s
+```
+
+**Terminal 2 - Worker (in a new terminal):**
 ```bash
+# Navigate to worker
 cd apps/worker
+
+# Start the worker
 pnpm dev
 ```
 
-### Production Mode
+**Expected output:**
+```
+> worker@0.1.0 dev
+> tsx watch src/index.ts
 
-#### 1. Build the Application
-
-```bash
-# From root directory
-pnpm build
+[INFO] Worker starting...
+[INFO] Connected to Redis at redis://...
+[INFO] Registered watermark worker
+[INFO] Registered email worker
+[INFO] Worker ready and listening for jobs
 ```
 
-This builds:
-- All packages (`@docuroute/core`, `@docuroute/db`, etc.)
-- Web application (Next.js)
-- Worker
+💡 **Why separate terminals?** Makes it easier to see which service is logging what message.
 
-#### 2. Run in Production
+---
 
-**Web Application:**
+### Verify Everything is Running
+
+#### 1. Check the Web App
+
+Open your browser and go to: **http://localhost:3000**
+
+You should see:
+- ✅ DocuRoute landing/login page
+- ✅ "Sign in with Email" button
+- ✅ No error messages
+
+⚠️ **If you see an error page:**
+- Check the terminal for error messages
+- Make sure `.env.local` files are configured correctly
+- Verify database migrations ran successfully
+
+---
+
+#### 2. Check the API Health Endpoint
+
+This endpoint confirms the app can connect to the database and Redis.
+
 ```bash
-cd apps/web
-pnpm start
+# In a new terminal, test the API
+curl http://localhost:3000/api/health
 ```
 
-**Worker:**
-```bash
-cd apps/worker
-node dist/index.js
+**Expected response:**
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-04-06T03:19:18.803Z",
+  "database": "connected",
+  "redis": "connected"
+}
 ```
 
-### Verify Services
+✅ **All "connected"?** Perfect! Everything is working.
 
-1. **Web App:** Open http://localhost:3000
-2. **API Health:** http://localhost:3000/api/health
-3. **Database Connection:** Check web app logs for successful connection
+⚠️ **If you see errors:**
+- `database: "error"` → Check `DATABASE_URL` in `.env.local`
+- `redis: "error"` → Check `REDIS_URL` in `.env.local`
+
+---
+
+#### 3. Check the Worker Logs
+
+Look at the worker terminal. You should see:
+- ✅ "Worker started successfully"
+- ✅ "Connected to Redis"
+- ✅ "Listening for jobs"
+- ✅ No error messages
+
+The worker is idle until there's a background job to process (like watermarking a PDF).
+
+---
+
+### First-Time Setup: Create Your Admin Account
+
+Now that the app is running, let's create your platform admin account!
+
+#### Step 1: Access the Application
+
+1. Open your browser
+2. Go to **http://localhost:3000**
+3. You should see the sign-in page
+
+---
+
+#### Step 2: Sign In with Your Admin Email
+
+1. Click **"Sign in with Email"**
+2. Enter the email address you set as `PLATFORM_ADMIN_EMAIL` in your `.env.local`
+3. Click **"Send Magic Link"**
+
+**What happens:**
+- DocuRoute sends a magic link email to your address
+- No password needed! (passwordless authentication)
+- The link expires after 1 hour
+
+💡 **Magic link authentication** is more secure than passwords - no password to forget or steal!
+
+---
+
+#### Step 3: Check Your Email
+
+1. Open your email inbox
+2. Look for an email from **DocuRoute** (or from `onboarding@resend.dev` if using Resend's test domain)
+3. Subject: "Sign in to DocuRoute"
+4. Click the **"Sign in to DocuRoute"** button in the email
+
+**Expected:**
+- Opens a new browser tab
+- Automatically logs you in
+- Redirects to the dashboard
+
+⚠️ **Didn't receive the email?**
+
+Check these:
+1. **Spam folder** - Magic link emails sometimes land here
+2. **Resend dashboard** - Go to resend.com > Logs to see if email was sent
+3. **Email address** - Make sure you used the exact email from `PLATFORM_ADMIN_EMAIL`
+4. **Worker logs** - Check if worker is running (emails are sent via background jobs)
+5. **Resend API key** - Verify it's valid in your `.env.local`
+
+**Debug emails:**
+```bash
+# Check worker logs for email job
+# Look for messages like:
+# [INFO] Processing job: send-email
+# [SUCCESS] Email sent to your-email@example.com
+```
+
+---
+
+#### Step 4: Welcome to DocuRoute!
+
+After clicking the magic link, you're logged in as the **Platform Admin** - the superuser with all permissions.
+
+You should see:
+- ✅ DocuRoute dashboard
+- ✅ Your email in the top-right corner
+- ✅ Sidebar with navigation menu
+- ✅ "Settings" menu includes "Platform" option (only visible to platform admins)
+
+🎉 **Congratulations!** You're now logged in and ready to set up your first company.
+
+---
+
+### Understanding Your Development Environment
+
+Now that everything is running, here's what's happening behind the scenes:
+
+#### Hot Reload / Fast Refresh
+
+When you edit code files:
+- **Frontend changes** (React components): Page updates instantly without losing state
+- **Backend changes** (API routes): Server restarts automatically (~2 seconds)
+- **CSS changes**: Styles update instantly
+
+Try it:
+1. Open `apps/web/src/app/page.tsx` in your editor
+2. Change some text
+3. Save the file
+4. Watch your browser update instantly
+
+#### Development vs Production
+
+You're running in **development mode**, which includes:
+- ✅ Detailed error messages with stack traces
+- ✅ Hot reload for instant updates
+- ✅ Unoptimized code (larger, easier to debug)
+- ✅ Source maps (map compiled code back to source)
+- ⚠️ Slower performance (not a problem for development)
+
+For production, you'll build optimized code (covered later in deployment section).
+
+---
+
+### Common Issues & Quick Fixes
+
+#### "Port 3000 is already in use"
+
+**Problem:** Another process is using port 3000.
+
+**Solution:**
+```bash
+# Find what's using port 3000
+lsof -ti:3000
+
+# Kill it
+kill -9 $(lsof -ti:3000)
+
+# Or use a different port
+PORT=3001 pnpm dev
+```
+
+---
+
+#### "Cannot find module '@prisma/client'"
+
+**Problem:** Prisma client wasn't generated.
+
+**Solution:**
+```bash
+pnpm --filter @docuroute/db exec prisma generate
+```
+
+---
+
+#### "Database connection failed"
+
+**Problem:** Can't connect to PostgreSQL.
+
+**Solution:**
+1. Check `DATABASE_URL` in `apps/web/.env.local`
+2. Verify Supabase project is running
+3. Test connection:
+```bash
+psql "your-DATABASE_URL-here" -c "SELECT 1;"
+```
+
+---
+
+#### "Redis connection timeout"
+
+**Problem:** Can't connect to Redis.
+
+**Solution:**
+1. Check `REDIS_URL` in `apps/web/.env.local` and `apps/worker/.env.local`
+2. Verify Upstash Redis database is running
+3. Make sure URL starts with `redis://` not `rediss://`
+4. Test connection:
+```bash
+redis-cli -u "your-REDIS_URL-here" PING
+# Should respond: PONG
+```
+
+---
+
+#### Worker not processing jobs
+
+**Problem:** Background jobs aren't running (emails not sending, PDFs not watermarking).
+
+**Solution:**
+1. Make sure worker is running (`pnpm dev` in `apps/worker`)
+2. Check worker logs for errors
+3. Verify `REDIS_URL` is the same in both web and worker `.env.local` files
+4. Restart worker: `Ctrl+C` then `pnpm dev` again
+
+---
+
+### ✅ **Checkpoint: Application Running Successfully**
+
+Before continuing, verify:
+- ✅ Web app accessible at http://localhost:3000
+- ✅ Health endpoint returns `{"status":"ok"}`
+- ✅ Worker running and connected to Redis
+- ✅ No errors in terminal logs
+- ✅ Successfully signed in with magic link email
+- ✅ Logged in as Platform Admin
+- ✅ Dashboard visible
+
+🚀 **Amazing work!** Your DocuRoute development environment is fully operational. Let's set up your first company and project next!
 
 ---
 
