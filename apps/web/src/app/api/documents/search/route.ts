@@ -9,12 +9,16 @@ import { unauthorized, validationError } from '@docuroute/core/src/errors'
 /**
  * GET /api/documents/search
  *
- * Full-text search for documents using pg_trgm similarity search.
+ * Enhanced search for documents with multiple search modes:
+ * - metadata: Search in document codes and titles using pg_trgm (default)
+ * - fulltext: Search inside PDF content using PostgreSQL tsvector
+ * - both: Search in both metadata and content
  *
  * Permission required: VIEW_DOCUMENT
  *
  * Query parameters:
  * - q: string (required) - Search query
+ * - type: 'metadata' | 'fulltext' | 'both' - Search mode (default: 'metadata')
  * - projectId?: string - Filter by project
  * - discipline?: string - Filter by discipline
  * - status?: string - Filter by status
@@ -57,6 +61,7 @@ export const GET = withApiHandler(async (req: NextRequest) => {
   // Parse query parameters
   const searchParams = req.nextUrl.searchParams
   const query = searchParams.get('q')
+  const searchType = (searchParams.get('type') || 'metadata') as 'metadata' | 'fulltext' | 'both'
   const projectId = searchParams.get('projectId')
   const discipline = searchParams.get('discipline')
   const status = searchParams.get('status')
@@ -69,68 +74,152 @@ export const GET = withApiHandler(async (req: NextRequest) => {
 
   const skip = (page - 1) * limit
 
-  // Build where clause
-  const where: any = {
-    companyId: session.user.companyId,
-  }
+  // Build WHERE clause conditions
+  const whereConditions: string[] = [`d."companyId" = $1`]
+  const params: any[] = [session.user.companyId]
+  let paramIndex = 2
 
   if (projectId) {
-    where.projectId = projectId
+    whereConditions.push(`d."projectId" = $${paramIndex}`)
+    params.push(projectId)
+    paramIndex++
   }
 
   if (discipline) {
-    where.discipline = discipline
+    whereConditions.push(`d.discipline = $${paramIndex}`)
+    params.push(discipline)
+    paramIndex++
   }
 
   if (status) {
-    where.status = status
+    whereConditions.push(`d.status = $${paramIndex}`)
+    params.push(status)
+    paramIndex++
   }
 
-  // Use raw SQL for pg_trgm similarity search
-  // This searches in filename field using trigram similarity
-  const searchQuery = `
-    SELECT id, "companyId", "projectId", filename, "fileKey", "fileSize", "mimeType",
-           "sha256Hash", "uploadedBy", discipline, "issuePurpose", status,
-           "virusScanStatus", "virusScanCompletedAt", "watermarkStatus", metadata,
-           "createdAt", "updatedAt",
-           similarity(filename, $1) AS sml
-    FROM "Document"
-    WHERE "companyId" = $2
-      AND filename % $3
-      ${projectId ? `AND "projectId" = $${4}` : ''}
-      ${discipline ? `AND discipline = $${projectId ? 5 : 4}` : ''}
-      ${status ? `AND status = $${projectId && discipline ? 6 : projectId || discipline ? 5 : 4}` : ''}
-    ORDER BY sml DESC, "createdAt" DESC
-    LIMIT $${projectId && discipline && status ? 7 : projectId && discipline || projectId && status || discipline && status ? 6 : projectId || discipline || status ? 5 : 4}
-    OFFSET $${projectId && discipline && status ? 8 : projectId && discipline || projectId && status || discipline && status ? 7 : projectId || discipline || status ? 6 : 5}
-  `
+  // Execute search based on type
+  let searchQuery: string
+  let countQuery: string
+  let searchParams_final: any[]
+  let countParams_final: any[]
 
-  const params: any[] = [query, session.user.companyId, query]
-  if (projectId) params.push(projectId)
-  if (discipline) params.push(discipline)
-  if (status) params.push(status)
-  params.push(limit, skip)
+  if (searchType === 'metadata') {
+    // Metadata search using pg_trgm (original implementation)
+    searchQuery = `
+      SELECT d.id, d."companyId", d."projectId", d.filename, d."fileKey", d."fileSize",
+             d."mimeType", d."sha256Hash", d."uploadedBy", d.discipline, d."issuePurpose",
+             d.status, d."virusScanStatus", d."virusScanCompletedAt", d."watermarkStatus",
+             d.metadata, d."createdAt", d."updatedAt", d."documentCode", d.title,
+             d."hasSearchableContent",
+             similarity(d.filename, $${paramIndex}) AS rank
+      FROM "Document" d
+      WHERE ${whereConditions.join(' AND ')}
+        AND d.filename % $${paramIndex}
+      ORDER BY rank DESC, d."createdAt" DESC
+      LIMIT $${paramIndex + 1}
+      OFFSET $${paramIndex + 2}
+    `
 
-  // Count query for pagination
-  const countQuery = `
-    SELECT COUNT(*) as count
-    FROM "Document"
-    WHERE "companyId" = $1
-      AND filename % $2
-      ${projectId ? `AND "projectId" = $3` : ''}
-      ${discipline ? `AND discipline = $${projectId ? 4 : 3}` : ''}
-      ${status ? `AND status = $${projectId && discipline ? 5 : projectId || discipline ? 4 : 3}` : ''}
-  `
+    countQuery = `
+      SELECT COUNT(*) as count
+      FROM "Document" d
+      WHERE ${whereConditions.join(' AND ')}
+        AND d.filename % $${paramIndex}
+    `
 
-  const countParams: any[] = [session.user.companyId, query]
-  if (projectId) countParams.push(projectId)
-  if (discipline) countParams.push(discipline)
-  if (status) countParams.push(status)
+    searchParams_final = [...params, query, limit, skip]
+    countParams_final = [...params, query]
+  } else if (searchType === 'fulltext') {
+    // Full-text search using tsvector
+    // Convert query to tsquery format (handle spaces and special chars)
+    const tsQuery = query
+      .trim()
+      .split(/\s+/)
+      .map((word) => word.replace(/[^a-zA-Z0-9]/g, ''))
+      .filter((word) => word.length > 0)
+      .join(' & ')
+
+    searchQuery = `
+      SELECT d.id, d."companyId", d."projectId", d.filename, d."fileKey", d."fileSize",
+             d."mimeType", d."sha256Hash", d."uploadedBy", d.discipline, d."issuePurpose",
+             d.status, d."virusScanStatus", d."virusScanCompletedAt", d."watermarkStatus",
+             d.metadata, d."createdAt", d."updatedAt", d."documentCode", d.title,
+             d."hasSearchableContent",
+             ts_rank_cd(dc."searchVector", query) AS rank,
+             ts_headline('english', dc."plainText", query, 'MaxWords=30, MinWords=15') AS snippet
+      FROM "Document" d
+      INNER JOIN "DocumentContent" dc ON d.id = dc."documentId"
+      CROSS JOIN to_tsquery('english', $${paramIndex}) AS query
+      WHERE ${whereConditions.join(' AND ')}
+        AND dc."searchVector" @@ query
+      ORDER BY rank DESC, d."createdAt" DESC
+      LIMIT $${paramIndex + 1}
+      OFFSET $${paramIndex + 2}
+    `
+
+    countQuery = `
+      SELECT COUNT(*) as count
+      FROM "Document" d
+      INNER JOIN "DocumentContent" dc ON d.id = dc."documentId"
+      WHERE ${whereConditions.join(' AND ')}
+        AND dc."searchVector" @@ to_tsquery('english', $${paramIndex})
+    `
+
+    searchParams_final = [...params, tsQuery, limit, skip]
+    countParams_final = [...params, tsQuery]
+  } else {
+    // Both: search in metadata OR content
+    const tsQuery = query
+      .trim()
+      .split(/\s+/)
+      .map((word) => word.replace(/[^a-zA-Z0-9]/g, ''))
+      .filter((word) => word.length > 0)
+      .join(' & ')
+
+    searchQuery = `
+      SELECT DISTINCT ON (d.id)
+             d.id, d."companyId", d."projectId", d.filename, d."fileKey", d."fileSize",
+             d."mimeType", d."sha256Hash", d."uploadedBy", d.discipline, d."issuePurpose",
+             d.status, d."virusScanStatus", d."virusScanCompletedAt", d."watermarkStatus",
+             d.metadata, d."createdAt", d."updatedAt", d."documentCode", d.title,
+             d."hasSearchableContent",
+             COALESCE(
+               ts_rank_cd(dc."searchVector", query),
+               similarity(d.filename, $${paramIndex})
+             ) AS rank,
+             ts_headline('english', COALESCE(dc."plainText", ''), query, 'MaxWords=30, MinWords=15') AS snippet
+      FROM "Document" d
+      LEFT JOIN "DocumentContent" dc ON d.id = dc."documentId"
+      CROSS JOIN to_tsquery('english', $${paramIndex + 1}) AS query
+      WHERE ${whereConditions.join(' AND ')}
+        AND (
+          d.filename % $${paramIndex}
+          OR (dc."searchVector" IS NOT NULL AND dc."searchVector" @@ query)
+        )
+      ORDER BY d.id, rank DESC, d."createdAt" DESC
+      LIMIT $${paramIndex + 2}
+      OFFSET $${paramIndex + 3}
+    `
+
+    countQuery = `
+      SELECT COUNT(DISTINCT d.id) as count
+      FROM "Document" d
+      LEFT JOIN "DocumentContent" dc ON d.id = dc."documentId"
+      WHERE ${whereConditions.join(' AND ')}
+        AND (
+          d.filename % $${paramIndex}
+          OR (dc."searchVector" IS NOT NULL AND dc."searchVector" @@ to_tsquery('english', $${paramIndex + 1}))
+        )
+    `
+
+    searchParams_final = [...params, query, tsQuery, limit, skip]
+    countParams_final = [...params, query, tsQuery]
+  }
 
   // Execute queries
   const [documents, countResult] = await Promise.all([
-    prismaAdmin.$queryRawUnsafe(searchQuery, ...params),
-    prismaAdmin.$queryRawUnsafe(countQuery, ...countParams),
+    prismaAdmin.$queryRawUnsafe(searchQuery, ...searchParams_final),
+    prismaAdmin.$queryRawUnsafe(countQuery, ...countParams_final),
   ])
 
   const total = Number((countResult as any[])[0]?.count || 0)
@@ -145,6 +234,7 @@ export const GET = withApiHandler(async (req: NextRequest) => {
         total,
         pages,
       },
+      searchType,
     }),
     {
       status: 200,

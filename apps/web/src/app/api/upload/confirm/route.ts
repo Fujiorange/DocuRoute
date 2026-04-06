@@ -6,6 +6,7 @@ import { getPrismaForCompany } from '@docuroute/db'
 import { headObject } from '@docuroute/core/src/r2'
 import { logAuditEvent } from '@docuroute/core/src/audit'
 import { validateUploadedFile } from '@/lib/file-validation'
+import { isPDFExtractable } from '@docuroute/core/src/pdf-extraction'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { Readable } from 'stream'
 import {
@@ -232,6 +233,44 @@ export const POST = withApiHandler(async (req: Request) => {
 
   // Trigger async virus scan (stub for now - just log that it would happen)
   console.log(`[STUB] Would trigger virus scan for document ${document.id}`)
+
+  // Queue PDF text extraction if this is a PDF
+  if (isPDFExtractable(mimeType)) {
+    try {
+      // Import queue dynamically to avoid circular dependencies
+      const { Queue } = await import('bullmq')
+      const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+
+      const pdfExtractionQueue = new Queue('pdf-extraction', {
+        connection: { url: REDIS_URL },
+      })
+
+      await pdfExtractionQueue.add(
+        'extract',
+        {
+          documentId: document.id,
+          companyId: session.user.companyId,
+          fileKey,
+          mimeType,
+          revisionCode: 'A', // Phase 1: first upload is always revision A
+          fileSize,
+        },
+        {
+          priority: 1, // High priority for new uploads
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+        }
+      )
+
+      console.log(`[PDF Extraction] Queued extraction for document ${document.id}`)
+    } catch (error) {
+      // PDF extraction is non-blocking - log error but don't fail upload
+      console.error(`[PDF Extraction] Failed to queue extraction:`, error)
+    }
+  }
 
   // Write AuditLog
   await logAuditEvent({

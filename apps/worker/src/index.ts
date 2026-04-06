@@ -4,11 +4,13 @@ import { pdfExtractionWorker, pdfExtractionQueue } from './workers/pdf-extractio
 import { createSCIMWorker } from './workers/scim.worker'
 import { terminatePool } from '@docuroute/core/src/watermark'
 import { startViewLogRetentionCleanup } from './crons/view-log-retention'
+import { startPDFBackfill } from './crons/pdf-backfill'
 
 console.log('DocuRoute Worker started')
 
 // Start cron jobs
 startViewLogRetentionCleanup()
+startPDFBackfill()
 
 // Health endpoint on port 3001
 const server = http.createServer((req, res) => {
