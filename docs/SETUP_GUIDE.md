@@ -40,249 +40,837 @@
 
 ## Prerequisites
 
-Before installing DocuRoute, ensure you have the following installed:
+Before installing DocuRoute, ensure you have the following installed. Don't worry if you're new to these tools – we'll explain what each one does and why you need it.
 
 ### Required Software
 
-1. **Node.js** (v20 or higher)
-   ```bash
-   # Check version
-   node --version
-   ```
+#### 1. **Node.js** (v20 or higher) - JavaScript Runtime
 
-2. **pnpm** (v10.32.1 or higher)
-   ```bash
-   # Install pnpm globally
-   npm install -g pnpm@10.32.1
+**What is it?** Node.js allows you to run JavaScript code outside of a web browser. DocuRoute's backend and build tools run on Node.js.
 
-   # Check version
-   pnpm --version
-   ```
+**Installation:**
 
-3. **PostgreSQL** (v14 or higher)
-   ```bash
-   # Check if PostgreSQL is installed
-   psql --version
-   ```
+- **macOS:** Download from [nodejs.org](https://nodejs.org) or use Homebrew:
+  ```bash
+  brew install node@20
+  ```
 
-   **Note:** You can use a managed PostgreSQL service like Supabase instead of local installation.
+- **Windows:** Download the installer from [nodejs.org](https://nodejs.org)
 
-4. **Redis** (for BullMQ background jobs and rate limiting)
-   ```bash
-   # Check if Redis is installed
-   redis-cli --version
-   ```
+- **Linux (Ubuntu/Debian):**
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+  ```
 
-   **Note:** You can use Upstash Redis (managed service) for development.
+**Verify installation:**
+```bash
+node --version
+# Should show v20.x.x or higher
+```
+
+💡 **Tip:** If `node --version` shows a version lower than 20, you'll need to upgrade Node.js before proceeding.
+
+---
+
+#### 2. **pnpm** (v10.32.1 or higher) - Package Manager
+
+**What is it?** pnpm is a package manager that downloads and manages the libraries (dependencies) that DocuRoute needs. It's faster and more efficient than npm.
+
+**Why pnpm?** DocuRoute uses a "monorepo" structure with multiple interconnected packages. pnpm handles this better than npm or yarn.
+
+**Installation:**
+```bash
+# Install pnpm globally using npm (which comes with Node.js)
+npm install -g pnpm@10.32.1
+
+# Verify installation
+pnpm --version
+# Should show 10.32.1 or higher
+```
+
+💡 **Tip:** If you get a permission error on macOS/Linux, try using `sudo`: `sudo npm install -g pnpm@10.32.1`
+
+---
+
+#### 3. **PostgreSQL** (v14 or higher) - Database
+
+**What is it?** PostgreSQL is a powerful database that stores all of DocuRoute's data (users, documents, audit logs, etc.).
+
+**Do I need to install it locally?** No! We **strongly recommend** using a managed service like [Supabase](https://supabase.com) (which is free for development). This is much easier than installing PostgreSQL yourself.
+
+**Option A: Using Supabase (Recommended for Beginners):**
+1. Go to [supabase.com](https://supabase.com)
+2. Sign up for a free account
+3. Click "New Project"
+4. Choose a name, password, and region
+5. Wait 2-3 minutes for setup to complete
+6. We'll get the connection details later in [Database Setup](#database-setup)
+
+**Option B: Local PostgreSQL Installation (Advanced):**
+
+If you prefer to run PostgreSQL locally:
+
+- **macOS:**
+  ```bash
+  brew install postgresql@14
+  brew services start postgresql@14
+  ```
+
+- **Windows:** Download from [postgresql.org](https://www.postgresql.org/download/windows/)
+
+- **Linux (Ubuntu/Debian):**
+  ```bash
+  sudo apt install postgresql-14
+  sudo systemctl start postgresql
+  ```
+
+**Verify installation (local only):**
+```bash
+psql --version
+# Should show 14.x or higher
+```
+
+---
+
+#### 4. **Redis** (for background jobs and caching)
+
+**What is it?** Redis is an in-memory data store used by DocuRoute for:
+- **Background jobs** (like PDF watermarking, email sending)
+- **Rate limiting** (preventing abuse)
+- **Caching** (making permissions checks faster)
+
+**Do I need to install it locally?** No! We **strongly recommend** using [Upstash Redis](https://upstash.com) (free tier available). This is much easier than running Redis yourself.
+
+**Option A: Using Upstash Redis (Recommended for Beginners):**
+1. Go to [upstash.com](https://upstash.com)
+2. Sign up for a free account
+3. Click "Create Database"
+4. Choose a name and region close to you
+5. Select the free tier
+6. We'll get the connection details later in [External Services Setup](#external-services-setup)
+
+**Option B: Local Redis Installation (Advanced):**
+
+- **macOS:**
+  ```bash
+  brew install redis
+  brew services start redis
+  ```
+
+- **Windows:** Download from [redis.io](https://redis.io/download) or use WSL
+
+- **Linux (Ubuntu/Debian):**
+  ```bash
+  sudo apt install redis-server
+  sudo systemctl start redis
+  ```
+
+**Verify installation (local only):**
+```bash
+redis-cli --version
+# Should show 6.x or higher
+
+# Test connection
+redis-cli ping
+# Should respond with "PONG"
+```
+
+---
+
+### ✅ **Checkpoint: Prerequisites Complete**
+
+Before moving forward, verify you have:
+- ✅ Node.js v20+ installed (`node --version`)
+- ✅ pnpm v10.32.1+ installed (`pnpm --version`)
+- ✅ Signed up for Supabase OR installed PostgreSQL locally
+- ✅ Signed up for Upstash Redis OR installed Redis locally
+
+If all checkboxes are checked, you're ready to proceed!
 
 ### External Services (Required)
 
-You'll need accounts with the following services:
+DocuRoute relies on several cloud services to function. Most have generous free tiers perfect for development and testing. We'll explain what each service does and help you sign up.
 
-1. **Supabase** (or self-hosted PostgreSQL)
-   - Sign up at https://supabase.com
-   - Create a new project
-   - Note down: `DATABASE_URL` (pooled/port 6543) and `DIRECT_URL` (direct/port 5432)
+#### Summary of Services Needed:
 
-2. **Cloudflare R2** (S3-compatible object storage)
-   - Sign up at https://dash.cloudflare.com
-   - Navigate to R2 Object Storage
-   - Create a bucket
-   - Generate API tokens
+| Service | Purpose | Free Tier? | Required? |
+|---------|---------|------------|-----------|
+| **Supabase** | Database hosting | ✅ Yes | ✅ Yes |
+| **Cloudflare R2** | File storage (PDFs, etc.) | ✅ 10GB free | ✅ Yes |
+| **Resend** | Email delivery | ✅ 100 emails/day | ✅ Yes |
+| **Upstash Redis** | Background jobs & caching | ✅ 10K commands/day | ✅ Yes |
+| **VirusTotal** | Virus scanning | ✅ 500 lookups/day | ✅ Yes |
+| **Stripe** | Payment processing | ✅ Test mode free | ⚠️ Optional* |
+| **AWS KMS** | Encryption keys | ❌ No (but can skip) | ⚠️ Optional* |
 
-3. **Resend** (Email delivery)
-   - Sign up at https://resend.com
-   - Create API key
-   - Verify your sending domain
+\* For development, you can skip Stripe (if not testing billing) and use `LOCAL_KMS_MODE=true` instead of AWS KMS.
 
-4. **Upstash Redis** (Managed Redis)
-   - Sign up at https://upstash.com
-   - Create a Redis database
-   - Note down: `REDIS_URL` and REST API credentials
+---
 
-5. **Stripe** (Payment processing - optional for pilot)
-   - Sign up at https://stripe.com
-   - Get test API keys from dashboard
+#### 1. **Supabase** - PostgreSQL Database Hosting
 
-6. **AWS KMS** (Key Management - optional for pilot)
-   - Can use `LOCAL_KMS_MODE=true` for development
-   - For production: Create KMS key in AWS
+**What it does:** Hosts your PostgreSQL database in the cloud. No need to manage servers yourself!
 
-7. **VirusTotal** (File scanning)
-   - Sign up at https://www.virustotal.com
-   - Get API key from account settings
+**Sign up:**
+1. Go to [supabase.com](https://supabase.com)
+2. Click "Start your project"
+3. Sign up with GitHub, Google, or email
+4. Click "New Project"
+5. Fill in:
+   - **Name:** `docuroute-dev` (or any name you like)
+   - **Database Password:** Choose a strong password and **save it somewhere safe!**
+   - **Region:** Choose one close to you for better performance
+6. Click "Create new project"
+7. Wait 2-3 minutes for the database to be created
+
+**Getting your connection strings:**
+
+After the project is created:
+
+1. Click "Connect" button (or go to Project Settings > Database)
+2. Look for **Connection Pooling** section (this is the pooled connection)
+3. Copy the connection string that includes `:6543` in the port number
+   - This is your `DATABASE_URL`
+   - Format: `postgresql://postgres.xxx:password@aws-0-region.pooler.supabase.com:6543/postgres`
+4. Now look for **Direct Connection** section (or change the mode dropdown)
+5. Copy the connection string that includes `:5432` in the port number
+   - This is your `DIRECT_URL`
+   - Format: `postgresql://postgres.xxx:password@db.xxx.supabase.co:5432/postgres`
+
+💡 **Important:** You need BOTH URLs - the pooled one (`:6543`) for queries and the direct one (`:5432`) for migrations.
+
+**Save these for later** - you'll need them when setting up environment variables.
+
+---
+
+#### 2. **Cloudflare R2** - File Storage
+
+**What it does:** Stores uploaded PDF files, watermarked documents, and other files. It's like Dropbox but for applications. R2 is S3-compatible (compatible with Amazon S3) but cheaper.
+
+**Sign up:**
+1. Go to [dash.cloudflare.com](https://dash.cloudflare.com)
+2. Sign up for a Cloudflare account (free)
+3. Verify your email
+
+**Create a storage bucket:**
+1. In the Cloudflare dashboard, click **R2** in the left sidebar
+2. Click "Create bucket"
+3. Choose a name: `docuroute-files` (must be globally unique, add your initials if taken)
+4. Select a location (choose one close to you)
+5. Click "Create bucket"
+
+**Generate API credentials:**
+1. Go to **R2** > **Manage R2 API Tokens**
+2. Click "Create API token"
+3. Fill in:
+   - **Token name:** `docuroute-api`
+   - **Permissions:** Select "Object Read & Write"
+   - **Bucket:** Select the bucket you just created
+4. Click "Create API Token"
+5. **IMPORTANT:** Copy these values immediately (they won't be shown again):
+   - `Access Key ID` → This is your `R2_ACCESS_KEY_ID`
+   - `Secret Access Key` → This is your `R2_SECRET_ACCESS_KEY`
+   - `Account ID` → This is your `R2_ACCOUNT_ID` (shown at the top)
+
+**Get your public URL:**
+- Your bucket URL will be: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+- This is your `R2_PUBLIC_URL`
+
+💡 **Tip:** Store these credentials securely - you won't be able to see the secret key again!
+
+---
+
+#### 3. **Resend** - Email Delivery
+
+**What it does:** Sends emails from DocuRoute (magic login links, invitations, notifications).
+
+**Sign up:**
+1. Go to [resend.com](https://resend.com)
+2. Click "Sign Up"
+3. Create an account with email or GitHub
+4. Verify your email address
+
+**Get API key:**
+1. Once logged in, go to **API Keys** in the left sidebar
+2. Click "Create API Key"
+3. Give it a name: `docuroute-dev`
+4. Select permissions: **Full Access** (or "Sending access" if available)
+5. Click "Create"
+6. **Copy the API key immediately** - this is your `RESEND_API_KEY`
+7. Store it securely (you won't see it again)
+
+**For development (testing locally):**
+
+You can use Resend's test mode right away! For development, you can use their domain:
+- Set `RESEND_FROM_EMAIL=onboarding@resend.dev` (Resend provides this for testing)
+
+**For production (custom domain):**
+
+You'll need to verify your own domain:
+1. Go to **Domains** in Resend
+2. Click "Add Domain"
+3. Enter your domain (e.g., `yourdomain.com`)
+4. Add the DNS records they provide (SPF, DKIM, DMARC)
+5. Wait for verification (can take a few minutes to hours)
+6. Then use `RESEND_FROM_EMAIL=noreply@yourdomain.com`
+
+💡 **For now:** Just use `onboarding@resend.dev` for development. You can set up a custom domain later.
+
+---
+
+#### 4. **Upstash Redis** - Background Jobs & Caching
+
+**What it does:** Handles background tasks (like watermarking PDFs) and speeds up permission checks through caching.
+
+**Sign up:**
+1. Go to [upstash.com](https://upstash.com)
+2. Click "Get Started"
+3. Sign up with GitHub, Google, or email
+4. Verify your email
+
+**Create Redis database:**
+1. Click "Create Database"
+2. Fill in:
+   - **Name:** `docuroute-dev`
+   - **Type:** Select **Regional** (faster, cheaper)
+   - **Region:** Choose one close to you
+   - **Eviction:** Leave as default
+3. Click "Create"
+
+**Get connection details:**
+
+After creation, you'll see the database details page. You need TWO different connection methods:
+
+1. **For BullMQ (Background Jobs):**
+   - Look for section titled **"REST API"** or scroll down to **Connection**
+   - Find the **Redis Connection String** (starts with `redis://`)
+   - Copy the full URL: `redis://default:password@region.upstash.io:6379`
+   - This is your `REDIS_URL`
+
+2. **For Rate Limiting (REST API):**
+   - Find **REST API** section
+   - Copy `UPSTASH_REDIS_REST_URL` (starts with `https://`)
+   - Copy `UPSTASH_REDIS_REST_TOKEN` (long random string)
+
+💡 **Why two connection methods?** BullMQ (background jobs) needs the fast Redis protocol. Rate limiting can use the slower REST API since it's not time-critical.
+
+---
+
+#### 5. **VirusTotal** - File Scanning
+
+**What it does:** Scans uploaded files for viruses and malware to keep your system secure.
+
+**Sign up:**
+1. Go to [virustotal.com](https://www.virustotal.com)
+2. Click "Sign Up" in the top right
+3. Create a free account
+4. Verify your email
+
+**Get API key:**
+1. Log in and click your profile icon (top right)
+2. Select **API Key** from the dropdown
+3. Copy your API key - this is your `VIRUSTOTAL_API_KEY`
+
+💡 **Free tier limits:** 500 lookups per day (plenty for development)
+
+---
+
+#### 6. **Stripe** (Optional - for payment testing)
+
+**What it does:** Handles subscription payments and billing.
+
+**Do I need this?** Only if you want to test the billing features. You can skip this for now and add it later.
+
+**Sign up:**
+1. Go to [stripe.com](https://stripe.com)
+2. Create a free account
+3. Go to **Developers** > **API Keys**
+4. Find your **Publishable key** and **Secret key** (these are TEST keys)
+5. Copy both:
+   - Publishable key → `STRIPE_PUBLISHABLE_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+   - Secret key → `STRIPE_SECRET_KEY`
+
+**Webhook setup (advanced, skip for now):**
+
+Webhooks notify DocuRoute when payments succeed. You can set this up later when deploying to production.
+
+---
+
+#### 7. **AWS KMS** (Optional - encryption)
+
+**What it does:** Encrypts sensitive data using AWS Key Management Service.
+
+**Do I need this?** Not for development! Just use `LOCAL_KMS_MODE=true` in your environment variables.
+
+**For production (later):**
+1. Create an AWS account
+2. Go to AWS KMS service
+3. Create a customer master key (CMK)
+4. Copy the ARN (Amazon Resource Name)
+5. Create IAM credentials with KMS permissions
+
+💡 **For now:** Set `LOCAL_KMS_MODE=true` and skip AWS KMS entirely.
+
+---
+
+### ✅ **Checkpoint: Services Setup Complete**
+
+Before continuing, make sure you have:
+
+**Required Services:**
+- ✅ Supabase account created with database running
+- ✅ Saved `DATABASE_URL` (pooled, port 6543)
+- ✅ Saved `DIRECT_URL` (direct, port 5432)
+- ✅ Cloudflare R2 bucket created
+- ✅ Saved R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`)
+- ✅ Resend account created with API key
+- ✅ Upstash Redis database created
+- ✅ Saved Redis credentials (`REDIS_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`)
+- ✅ VirusTotal API key obtained
+
+**Optional Services (can add later):**
+- ⚠️ Stripe keys (only if testing billing)
+- ⚠️ AWS KMS (use `LOCAL_KMS_MODE=true` instead)
+
+💡 **Pro tip:** Create a temporary text file to store all these credentials. You'll need them in the next step when setting up environment variables!
 
 ---
 
 ## Installation
 
-### 1. Clone the Repository
+Now that you have all the prerequisites and services set up, let's install DocuRoute on your local machine.
+
+### Step 1: Clone the Repository
+
+**What this does:** Downloads the DocuRoute source code to your computer.
 
 ```bash
+# Open your terminal and navigate to where you want to store the project
+cd ~/Projects  # or wherever you keep your code
+
+# Clone the repository
 git clone https://github.com/Fujiorange/DocuRoute.git
+
+# Navigate into the project folder
 cd DocuRoute
 ```
 
-### 2. Install Dependencies
+💡 **What just happened?** You now have a folder called `DocuRoute` containing all the source code.
+
+**Verify:**
+```bash
+# List the contents
+ls -la
+
+# You should see folders like:
+# - apps/          (contains web app and worker)
+# - packages/      (shared code libraries)
+# - docs/          (documentation)
+# - package.json   (project configuration)
+```
+
+---
+
+### Step 2: Install Dependencies
+
+**What this does:** Downloads all the libraries and tools that DocuRoute needs to run (there are hundreds of them!).
 
 ```bash
-# Install all dependencies for all workspaces
+# Make sure you're in the DocuRoute folder
+pwd  # Should show: /path/to/DocuRoute
+
+# Install all dependencies
 pnpm install
 ```
 
-This will install dependencies for:
-- `apps/web` (Next.js frontend)
-- `apps/worker` (Background job processor)
-- `packages/core` (Business logic)
-- `packages/db` (Prisma client)
-- `packages/types` (Shared TypeScript types)
-- `packages/emails` (React Email templates)
+**What's happening during installation:**
+
+1. pnpm reads `package.json` files to see what's needed
+2. Downloads packages from npm registry
+3. Sets up links between workspace packages
+4. This might take 2-5 minutes depending on your internet speed
+
+💡 **Expected output:** You'll see a progress bar and lots of package names scrolling by. This is normal!
+
+**Successful installation looks like:**
+```
+Progress: resolved 1234, reused 1200, downloaded 34, added 1234
+packages/db: Running postinstall script, done in 2s
+Done in 3m 45s
+```
+
+⚠️ **Common issues:**
+
+- **Error: "EACCES: permission denied"** → Try running without `sudo`. If that doesn't work, fix npm permissions
+- **Error: "network timeout"** → Your internet connection might be slow. Try again
+- **Error: "Unsupported engine"** → Check your Node.js version with `node --version` (need v20+)
+
+**Verify installation:**
+```bash
+# Check that node_modules folder was created
+ls node_modules  # Should show lots of folders
+
+# Check that workspace packages were installed
+ls apps/web/node_modules  # Should exist
+ls packages/db/node_modules  # Should exist
+```
+
+### What You Just Installed:
+
+DocuRoute is a **monorepo** (multiple interconnected packages in one repository):
+
+```
+DocuRoute/
+├── apps/
+│   ├── web/          ← Next.js frontend application
+│   ├── worker/       ← Background job processor (PDF watermarking, emails)
+│   └── pdf-worker/   ← Go service for PDF processing
+├── packages/
+│   ├── core/         ← Business logic (permissions, watermarking, etc.)
+│   ├── db/           ← Prisma database client and schema
+│   ├── types/        ← Shared TypeScript type definitions
+│   └── emails/       ← Email templates (React Email)
+└── docs/             ← Documentation you're reading now!
+```
+
+💡 **Good to know:** When you run `pnpm install`, it installs dependencies for ALL of these packages at once.
+
+---
+
+### ✅ **Checkpoint: Installation Complete**
+
+Before moving on, verify:
+- ✅ Repository cloned successfully
+- ✅ `pnpm install` completed without errors
+- ✅ `node_modules` folder exists
+- ✅ All workspace packages have dependencies installed
+
+If any step failed, scroll up to see the error message and try to resolve it before continuing.
 
 ---
 
 ## Environment Configuration
 
-DocuRoute requires environment variables for both the web app and the worker. You need to create `.env.local` files in both `apps/web` and `apps/worker`.
+**What are environment variables?** These are secret configuration values (like passwords and API keys) that tell DocuRoute how to connect to services. They're stored in `.env.local` files which are kept out of git for security.
 
-### 1. Web Application Environment (`apps/web/.env.local`)
+**Why two separate `.env.local` files?** DocuRoute has two main applications:
+1. **Web app** (`apps/web`) - The main application users interact with
+2. **Worker** (`apps/worker`) - Background processor for heavy tasks
+
+Each needs its own configuration file.
+
+---
+
+### Step 1: Set Up Web Application Environment
+
+Navigate to the web app directory:
 
 ```bash
-# Navigate to web app directory
 cd apps/web
+```
 
+#### Create the Environment File
+
+```bash
 # Copy the example file
 cp .env.example .env.local
 
-# Edit the file
-nano .env.local  # or use your preferred editor
+# Open it for editing (choose your preferred editor)
+nano .env.local    # or use: code .env.local (VS Code), vim, etc.
 ```
 
-**Complete `.env.local` for `apps/web`:**
+💡 **What's the difference?**
+- `.env.example` - Template with placeholder values (safe to commit to git)
+- `.env.local` - Your actual secrets (NEVER committed to git - listed in `.gitignore`)
+
+---
+
+#### Fill In Your Configuration
+
+Now, let's fill in the `.env.local` file with the credentials you collected earlier. Here's what each section does:
+
+##### **Database Configuration**
 
 ```bash
 # ==========================================
 # Database (Supabase or PostgreSQL)
 # ==========================================
+
 # PgBouncer pooled URL (port 6543) - for general queries
-DATABASE_URL=postgresql://postgres:password@db.xxx.supabase.co:6543/postgres?pgbouncer=true
+# Use the pooled connection you got from Supabase
+DATABASE_URL=postgresql://postgres.xxx:yourpassword@aws-0-region.pooler.supabase.com:6543/postgres?pgbouncer=true
 
 # Direct connection (port 5432) - for migrations only
-DIRECT_URL=postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
+# Use the direct connection you got from Supabase
+DIRECT_URL=postgresql://postgres.xxx:yourpassword@db.xxx.supabase.co:5432/postgres
+```
 
+**What's the difference?**
+- **DATABASE_URL (pooled):** Used for normal app queries. Port 6543. Faster for many concurrent connections.
+- **DIRECT_URL (direct):** Used only for database migrations (schema changes). Port 5432. Required for migrations to work.
+
+⚠️ **Common mistake:** Swapping these URLs will cause migrations to fail!
+
+---
+
+##### **Authentication Configuration**
+
+```bash
 # ==========================================
 # Authentication (NextAuth)
 # ==========================================
+
 # Generate with: openssl rand -base64 32
-NEXTAUTH_SECRET=your-secret-key-here
+NEXTAUTH_SECRET=<generate-a-random-string-here>
 
-# Your application URL
+# Your application URL (keep as localhost for development)
 NEXTAUTH_URL=http://localhost:3000
+```
 
+**How to generate NEXTAUTH_SECRET:**
+
+```bash
+# In your terminal, run:
+openssl rand -base64 32
+
+# Copy the output and paste it as your NEXTAUTH_SECRET
+# Example output: kJh3k9Lm4nB6vC8xZ0qW2eR5tY7uI9oP1aS3dF6gH8j=
+```
+
+**What is this?** A secret key used to encrypt session cookies and JWT tokens. Keep it secret!
+
+---
+
+##### **Cloudflare R2 (File Storage)**
+
+```bash
 # ==========================================
 # Cloudflare R2 (File Storage)
 # ==========================================
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-access-key
-R2_SECRET_ACCESS_KEY=your-secret-key
-R2_BUCKET_NAME=docuroute-files
-R2_PUBLIC_URL=https://your-bucket.r2.cloudflarestorage.com
 
+# Use the values you saved from Cloudflare R2 setup
+R2_ACCOUNT_ID=your-account-id-here
+R2_ACCESS_KEY_ID=your-r2-access-key-here
+R2_SECRET_ACCESS_KEY=your-r2-secret-key-here
+R2_BUCKET_NAME=docuroute-files  # or whatever you named your bucket
+R2_PUBLIC_URL=https://your-account-id.r2.cloudflarestorage.com
+```
+
+💡 **Where to find these:** Go back to your Cloudflare dashboard > R2 > API Tokens
+
+---
+
+##### **AWS KMS (Encryption) - Development Mode**
+
+```bash
 # ==========================================
 # AWS KMS (Encryption)
 # ==========================================
-# For development, use local mode
+
+# For development, use local mode (no AWS account needed!)
 LOCAL_KMS_MODE=true
 
-# For production, configure AWS KMS
+# For production (commented out for now):
 # AWS_KMS_KEY_ARN=arn:aws:kms:region:account:key/xxx
 # AWS_ACCESS_KEY_ID=your-aws-key
 # AWS_SECRET_ACCESS_KEY=your-aws-secret
 # AWS_REGION=us-east-1
+```
 
+**What is this?** Encryption for sensitive data. In local mode, it uses simple encryption. In production, it uses AWS for stronger security.
+
+**For now:** Just set `LOCAL_KMS_MODE=true` and you're done!
+
+---
+
+##### **Email (Resend)**
+
+```bash
 # ==========================================
 # Email (Resend)
 # ==========================================
-RESEND_API_KEY=re_xxx
-RESEND_FROM_EMAIL=noreply@yourdomain.com
 
+# Use the API key from Resend
+RESEND_API_KEY=re_your_api_key_here
+
+# For development, use Resend's test domain:
+RESEND_FROM_EMAIL=onboarding@resend.dev
+
+# For production with your own domain:
+# RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+💡 **Development tip:** Use `onboarding@resend.dev` for now. You can set up a custom domain later.
+
+---
+
+##### **Stripe (Payment Processing) - Optional**
+
+```bash
 # ==========================================
 # Stripe (Payment Processing)
 # ==========================================
-STRIPE_SECRET_KEY=sk_test_xxx
-STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-STRIPE_WEBHOOK_SECRET=whsec_xxx
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 
+# Only fill these in if you want to test billing features
+STRIPE_SECRET_KEY=sk_test_your_secret_key
+STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key  # same as above
+```
+
+⚠️ **Can skip:** If you're not testing billing, you can leave these blank or commented out.
+
+---
+
+##### **Redis (Rate Limiting & Background Jobs)**
+
+```bash
 # ==========================================
 # Redis (Rate Limiting - Upstash REST API)
 # ==========================================
-UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your-token
+
+# From Upstash dashboard > Your database > REST API section
+UPSTASH_REDIS_REST_URL=https://your-db.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-long-token-here
 
 # ==========================================
 # Redis (BullMQ - Direct Protocol)
 # ==========================================
-# Use redis:// scheme for BullMQ worker connection
-REDIS_URL=redis://default:password@xxx.upstash.io:6379
 
+# From Upstash dashboard > Your database > Redis section
+# IMPORTANT: Must start with redis:// (not rediss://)
+REDIS_URL=redis://default:your-password@your-db.upstash.io:6379
+```
+
+**Why two Redis configurations?**
+- **REST API:** For rate limiting (slower but simpler)
+- **Direct protocol:** For background jobs (much faster, required for BullMQ)
+
+⚠️ **Important:** Make sure `REDIS_URL` starts with `redis://` not `rediss://`
+
+---
+
+##### **Cron Protection**
+
+```bash
 # ==========================================
 # Cron Protection
 # ==========================================
-# Generate with: openssl rand -hex 32
-CRON_SECRET=your-cron-secret
 
+# Generate with: openssl rand -hex 32
+CRON_SECRET=<generate-another-random-string>
+```
+
+**Generate it:**
+```bash
+openssl rand -hex 32
+# Example output: 4f7a8b9c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f
+```
+
+**What is this?** Prevents unauthorized access to scheduled tasks (cron jobs).
+
+---
+
+##### **Application Configuration**
+
+```bash
 # ==========================================
 # Application Configuration
 # ==========================================
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-NEXT_PUBLIC_VERSION=0.1.0
 
+NEXT_PUBLIC_APP_URL=http://localhost:3000  # Keep this for local development
+NEXT_PUBLIC_VERSION=0.1.0  # Current version
+```
+
+---
+
+##### **Platform Admin**
+
+```bash
 # ==========================================
 # Platform Admin
 # ==========================================
-# Email address for platform admin account
-PLATFORM_ADMIN_EMAIL=admin@yourdomain.com
 
+# Use YOUR email address here - you'll use this to log in!
+PLATFORM_ADMIN_EMAIL=your-email@example.com
+```
+
+**Important:** The first user to sign in with this email automatically becomes the platform admin (super user).
+
+---
+
+##### **Pilot Seeding (Optional)**
+
+```bash
 # ==========================================
 # Pilot Seeding (Optional)
 # ==========================================
-PILOT_OWNER_EMAIL=pilot@yourdomain.com
-PILOT_PROJECT_NAME=Pilot Project
-PILOT_NAMING_MASK=PRJ-{YYYY}-{####}
 
+# These are used if you run the seed script to create test data
+PILOT_OWNER_EMAIL=pilot@yourdomain.com
+PILOT_PROJECT_NAME=Test Project
+PILOT_NAMING_MASK=PRJ-{YYYY}-{####}
+```
+
+⚠️ **Can skip:** Only needed if you want to create sample/demo data.
+
+---
+
+##### **Virus Scanning**
+
+```bash
 # ==========================================
 # Virus Scanning
 # ==========================================
-VIRUSTOTAL_API_KEY=your-virustotal-api-key
 
+# From VirusTotal dashboard
+VIRUSTOTAL_API_KEY=your-virustotal-api-key-here
+```
+
+---
+
+##### **QR Verification**
+
+```bash
 # ==========================================
 # QR Verification
 # ==========================================
-# Must be publicly accessible (no login required)
+
+# For development, keep as localhost
 QR_VERIFICATION_BASE_URL=http://localhost:3000
+
+# For production, use your actual domain:
+# QR_VERIFICATION_BASE_URL=https://yourdomain.com
 ```
 
-### 2. Worker Environment (`apps/worker/.env.local`)
+**What is this?** The URL that QR codes on documents link to for verification.
+
+---
+
+### Step 2: Set Up Worker Environment
+
+Now navigate to the worker directory:
 
 ```bash
-# Navigate to worker directory
+# From the web directory, go back to root, then to worker
 cd ../worker
 
 # Copy the example file
 cp .env.example .env.local
 
-# Edit the file
+# Edit it
 nano .env.local
 ```
 
-**Complete `.env.local` for `apps/worker`:**
+The worker needs fewer environment variables (no Stripe, no Next.js specific stuff):
 
 ```bash
 # ==========================================
 # Database
 # ==========================================
-DATABASE_URL=postgresql://postgres:password@db.xxx.supabase.co:6543/postgres?pgbouncer=true
-DIRECT_URL=postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres.xxx:yourpassword@aws-0-region.pooler.supabase.com:6543/postgres?pgbouncer=true
+DIRECT_URL=postgresql://postgres.xxx:yourpassword@db.xxx.supabase.co:5432/postgres
 
 # ==========================================
 # Cloudflare R2
@@ -291,43 +879,80 @@ R2_ACCOUNT_ID=your-account-id
 R2_ACCESS_KEY_ID=your-access-key
 R2_SECRET_ACCESS_KEY=your-secret-key
 R2_BUCKET_NAME=docuroute-files
-R2_PUBLIC_URL=https://your-bucket.r2.cloudflarestorage.com
+R2_PUBLIC_URL=https://your-account-id.r2.cloudflarestorage.com
 
 # ==========================================
 # AWS KMS
 # ==========================================
 LOCAL_KMS_MODE=true
-# AWS_KMS_KEY_ARN=arn:aws:kms:region:account:key/xxx
-# AWS_ACCESS_KEY_ID=your-aws-key
-# AWS_SECRET_ACCESS_KEY=your-aws-secret
-# AWS_REGION=us-east-1
 
 # ==========================================
 # Email (Resend)
 # ==========================================
-RESEND_API_KEY=re_xxx
-RESEND_FROM_EMAIL=noreply@yourdomain.com
+RESEND_API_KEY=re_your_api_key_here
+RESEND_FROM_EMAIL=onboarding@resend.dev
 
 # ==========================================
 # Redis (BullMQ)
 # ==========================================
-REDIS_URL=redis://default:password@xxx.upstash.io:6379
+REDIS_URL=redis://default:your-password@your-db.upstash.io:6379
 
 # ==========================================
 # Cron Protection
 # ==========================================
-CRON_SECRET=your-cron-secret
+CRON_SECRET=your-cron-secret-here  # Use the SAME value as in web app
 
 # ==========================================
 # Platform Admin
 # ==========================================
-PLATFORM_ADMIN_EMAIL=admin@yourdomain.com
+PLATFORM_ADMIN_EMAIL=your-email@example.com  # Use the SAME email as in web app
 
 # ==========================================
 # QR Verification
 # ==========================================
 QR_VERIFICATION_BASE_URL=http://localhost:3000
 ```
+
+💡 **Important:** Use the **same values** for:
+- Database URLs
+- R2 credentials
+- Redis URL
+- `CRON_SECRET` (must match!)
+- `PLATFORM_ADMIN_EMAIL` (must match!)
+
+---
+
+### ✅ **Checkpoint: Environment Configuration Complete**
+
+Before continuing, verify:
+
+**For `apps/web/.env.local`:**
+- ✅ Both database URLs configured (port 6543 and 5432)
+- ✅ `NEXTAUTH_SECRET` generated and set
+- ✅ R2 credentials filled in (all 5 values)
+- ✅ `RESEND_API_KEY` set
+- ✅ Redis credentials set (both REST and direct protocol)
+- ✅ `CRON_SECRET` generated and set
+- ✅ `PLATFORM_ADMIN_EMAIL` set to your email
+- ✅ `VIRUSTOTAL_API_KEY` set
+- ✅ `LOCAL_KMS_MODE=true` set
+
+**For `apps/worker/.env.local`:**
+- ✅ All required values filled in
+- ✅ `CRON_SECRET` matches the web app
+- ✅ `PLATFORM_ADMIN_EMAIL` matches the web app
+
+**Verify files exist:**
+```bash
+# From the root directory
+ls apps/web/.env.local      # Should exist
+ls apps/worker/.env.local   # Should exist
+
+# Check they're not empty
+wc -l apps/web/.env.local   # Should show 20+ lines
+```
+
+🎉 **Great job!** Your environment is configured. Let's set up the database next.
 
 ---
 
