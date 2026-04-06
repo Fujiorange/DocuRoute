@@ -152,3 +152,40 @@ export async function getSignedDownloadUrl(
   return await getSignedUrl(client, command, { expiresIn })
 }
 
+/**
+ * getFileBuffer
+ *
+ * Downloads a file from R2 and returns it as a Buffer.
+ * Used for server-side processing (watermarking, text extraction, etc.)
+ *
+ * @param fileKey - The R2 object key
+ * @returns File content as Buffer
+ */
+export async function getFileBuffer(fileKey: string): Promise<Buffer> {
+  const bucketName = process.env.R2_BUCKET_NAME
+
+  if (!bucketName) {
+    throw new Error("R2_BUCKET_NAME environment variable not configured")
+  }
+
+  const client = getR2Client()
+
+  const command = new GetObjectCommand({
+    Bucket: bucketName,
+    Key: fileKey,
+  })
+
+  const response = await client.send(command)
+
+  if (!response.Body) {
+    throw new Error(`File not found: ${fileKey}`)
+  }
+
+  // Convert stream to buffer
+  const chunks: Uint8Array[] = []
+  for await (const chunk of response.Body as any) {
+    chunks.push(chunk)
+  }
+
+  return Buffer.concat(chunks)
+}

@@ -1,5 +1,6 @@
 import http from 'http'
 import { watermarkWorker, watermarkQueue } from './workers/watermark.worker'
+import { pdfExtractionWorker, pdfExtractionQueue } from './workers/pdf-extraction.worker'
 import { createSCIMWorker } from './workers/scim.worker'
 import { terminatePool } from '@docuroute/core/src/watermark'
 import { startViewLogRetentionCleanup } from './crons/view-log-retention'
@@ -30,6 +31,7 @@ const server = http.createServer((req, res) => {
         },
         queues: {
           watermark: 'active',
+          pdfExtraction: 'active',
         },
         pool: {
           size: 2,
@@ -73,9 +75,12 @@ process.on('unhandledRejection', async (reason, promise) => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully...')
 
-  // Close watermark worker
+  // Close workers
   await watermarkWorker.close()
   console.log('Watermark worker closed')
+
+  await pdfExtractionWorker.close()
+  console.log('PDF extraction worker closed')
 
   // Terminate workerpool
   await terminatePool()

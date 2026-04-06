@@ -90,32 +90,34 @@ model Project {
 }
 
 model Document {
-  id           String  @id @default(cuid())
-  companyId    String
-  projectId    String?
-  documentCode String? // Document register code (e.g., "DWG-001", "SPEC-042")
-  title        String? // Document title for register view
-  filename     String
-  fileKey      String
-  fileSize     Int
-  mimeType     String
-  sha256Hash   String
-  uploadedBy   String  // userId
+  id                   String            @id @default(cuid())
+  companyId            String
+  projectId            String?
+  documentCode         String?           // Document register code (e.g., "DWG-001", "SPEC-042")
+  title                String?           // Document title for register view
+  filename             String
+  fileKey              String
+  fileSize             Int
+  mimeType             String
+  sha256Hash           String
+  uploadedBy           String            // userId
 
   // Industry fields — required from day 1, not deferred to Phase 2.
   // Field workers need discipline and issue purpose the moment a document is uploaded.
-  discipline   String? // EngineeringDiscipline enum value
-  issuePurpose String? // IssuePurpose enum value
+  discipline           String?           // EngineeringDiscipline enum value
+  issuePurpose         String?           // IssuePurpose enum value
 
-  status               String    @default("PENDING") // DocumentStatus enum value
-  virusScanStatus      String    @default("PENDING") // VirusScanStatus enum value
+  status               String            @default("PENDING") // DocumentStatus enum value
+  virusScanStatus      String            @default("PENDING") // VirusScanStatus enum value
   virusScanCompletedAt DateTime?
-  watermarkStatus      String    @default("PENDING") // WatermarkStatus enum value
-  metadata             Json?     // For { watermarkSkipped: true, reason, acknowledgedByUserId, acknowledgedAt }
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  company              Company   @relation(fields: [companyId], references: [id])
-  project              Project?  @relation(fields: [projectId], references: [id])
+  watermarkStatus      String            @default("PENDING") // WatermarkStatus enum value
+  hasSearchableContent Boolean           @default(false) // Quick flag for full-text search filtering
+  metadata             Json?             // For { watermarkSkipped: true, reason, acknowledgedByUserId, acknowledgedAt }
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  company              Company           @relation(fields: [companyId], references: [id])
+  project              Project?          @relation(fields: [projectId], references: [id])
+  content              DocumentContent?
   // pg_trgm GIN indexes for fuzzy search — created in migration 20260323_performance_indexes
   // Required for fast document search (<500ms with 100,000+ documents)
 
@@ -124,6 +126,7 @@ model Document {
   @@index([companyId, createdAt])
   @@index([companyId, projectId])
   @@index([projectId, status, createdAt])
+  @@index([companyId, hasSearchableContent])
 }
 
 // Minimal DocumentRevision model — required for QR verification route
@@ -147,6 +150,26 @@ model DocumentRevision {
 
   @@index([documentId, status])
   @@index([companyId])
+}
+
+// DocumentContent — Full-text search for PDF documents.
+// Stores extracted text from PDFs with PostgreSQL tsvector for fast full-text search.
+// GIN index on searchVector enables sub-second search across millions of documents.
+model DocumentContent {
+  id           String                   @id @default(cuid())
+  documentId   String                   @unique
+  companyId    String                   // Denormalized for RLS policies
+  revisionCode String                   // Which revision this content belongs to
+  plainText    String                   @db.Text // Extracted PDF text
+  searchVector Unsupported("tsvector")? // PostgreSQL tsvector for full-text search
+  extractedAt  DateTime                 @default(now())
+  pageCount    Int?                     // Number of pages in PDF
+  fileSize     Int?                     // Size in bytes for metrics
+  document     Document                 @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  company      Company                  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@index([companyId, documentId])
 }
 
 model AuditLog {
