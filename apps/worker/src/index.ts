@@ -2,8 +2,12 @@ import http from 'http'
 import { watermarkWorker, watermarkQueue } from './workers/watermark.worker'
 import { createSCIMWorker } from './workers/scim.worker'
 import { terminatePool } from '@docuroute/core/src/watermark'
+import { startViewLogRetentionCleanup } from './crons/view-log-retention'
 
 console.log('DocuRoute Worker started')
+
+// Start cron jobs
+startViewLogRetentionCleanup()
 
 // Health endpoint on port 3001
 const server = http.createServer((req, res) => {

@@ -7,23 +7,21 @@ import { Permission, AuditAction, ViewType } from '@docuroute/types'
 import { unauthorized, notFound } from '@docuroute/core/src/errors'
 import { logAuditEvent } from '@docuroute/core/src/audit'
 import { logDocumentView, extractRequestMetadata } from '@docuroute/core/src/document-view-audit'
+import { getSignedDownloadUrl } from '@docuroute/core/src/r2'
 
 /**
- * GET /api/documents/[id]
+ * GET /api/documents/[id]/download
  *
- * Document Detail API - Get full document info with revisions and audit history
+ * Document Download API - Generate presigned download URL for document
  *
- * Permission required: VIEW_DOCUMENT
+ * Permission required: DOWNLOAD_DOCUMENT
  *
  * Response:
  * {
- *   document: {
- *     id, documentCode, title, filename, fileKey, fileSize, mimeType,
- *     status, discipline, issuePurpose, watermarkStatus,
- *     uploadedBy, createdAt, updatedAt,
- *     revisions: Array<DocumentRevision>
- *   },
- *   auditLog: Array<AuditLog> (last 50 entries)
+ *   downloadUrl: string (presigned R2 URL, expires in 1 hour)
+ *   filename: string
+ *   fileSize: number
+ *   mimeType: string
  * }
  */
 export const GET = withApiHandler(async (req: NextRequest, { params }: { params: { id: string } }) => {
@@ -42,13 +40,13 @@ export const GET = withApiHandler(async (req: NextRequest, { params }: { params:
       systemRoleKey: session.user.systemRoleKey,
       roleName: session.user.roleName,
     },
-    [Permission.VIEW_DOCUMENT]
+    [Permission.DOWNLOAD_DOCUMENT]
   )
 
   const prisma = getPrismaForCompany(session.user.companyId)
   const documentId = params.id
 
-  // Fetch document with all revisions
+  // Fetch document
   const document = await prisma.document.findUnique({
     where: {
       id: documentId,
@@ -57,18 +55,10 @@ export const GET = withApiHandler(async (req: NextRequest, { params }: { params:
     select: {
       id: true,
       documentCode: true,
-      title: true,
       filename: true,
       fileKey: true,
       fileSize: true,
       mimeType: true,
-      status: true,
-      discipline: true,
-      issuePurpose: true,
-      watermarkStatus: true,
-      uploadedBy: true,
-      createdAt: true,
-      updatedAt: true,
     },
   })
 
@@ -76,50 +66,10 @@ export const GET = withApiHandler(async (req: NextRequest, { params }: { params:
     throw notFound()
   }
 
-  // Fetch all revisions for this document
-  // ORDER BY: CURRENT first, then by createdAt DESC
-  const revisions = await prisma.documentRevision.findMany({
-    where: {
-      documentId: documentId,
-      companyId: session.user.companyId,
-    },
-    orderBy: [
-      { status: 'desc' }, // CURRENT sorts before SUPERSEDED alphabetically
-      { createdAt: 'desc' },
-    ],
-    select: {
-      id: true,
-      revisionCode: true,
-      status: true,
-      discipline: true,
-      issuePurpose: true,
-      watermarkStatus: true,
-      uploadedBy: true,
-      createdAt: true,
-    },
-  })
+  // Generate presigned download URL (expires in 1 hour)
+  const downloadUrl = await getSignedDownloadUrl(document.fileKey, 3600)
 
-  // Fetch recent audit log entries for this document
-  const auditLog = await prisma.auditLog.findMany({
-    where: {
-      companyId: session.user.companyId,
-      resourceType: 'Document',
-      resourceId: documentId,
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-    take: 50,
-    select: {
-      id: true,
-      action: true,
-      userId: true,
-      createdAt: true,
-      metadata: true,
-    },
-  })
-
-  // Log this document view (existing audit event - kept for backward compatibility)
+  // Log download action for audit trail
   await logAuditEvent({
     userId: session.user.id,
     companyId: session.user.companyId,
@@ -128,32 +78,30 @@ export const GET = withApiHandler(async (req: NextRequest, { params }: { params:
     resourceId: documentId,
     ipAddress: req.headers.get('x-forwarded-for') || undefined,
     userAgent: req.headers.get('user-agent') || undefined,
-    permissionsUsed: [Permission.VIEW_DOCUMENT],
+    permissionsUsed: [Permission.DOWNLOAD_DOCUMENT],
     metadata: {
       documentCode: document.documentCode,
       filename: document.filename,
     },
   })
 
-  // NEW: Log document view for compliance tracking (fire-and-forget)
+  // Log document view for compliance tracking (fire-and-forget)
   const { ipAddress, userAgent } = extractRequestMetadata(req)
   logDocumentView({
     documentId: documentId,
     userId: session.user.id,
     companyId: session.user.companyId,
-    viewType: ViewType.DETAIL_PAGE,
+    viewType: ViewType.DOWNLOAD,
     ipAddress,
     userAgent,
-    // sessionId can be added later when we have proper session tracking
   })
 
   return new Response(
     JSON.stringify({
-      document: {
-        ...document,
-        revisions,
-      },
-      auditLog,
+      downloadUrl,
+      filename: document.filename,
+      fileSize: document.fileSize,
+      mimeType: document.mimeType,
     }),
     {
       status: 200,

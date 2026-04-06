@@ -34,6 +34,7 @@ model Company {
   planTier                       String             @default("PILOT")
   recycleBinRetentionDays        Int                @default(90)
   bulkOperationUndoWindowMinutes Int                @default(30)
+  viewLogRetentionDays           Int                @default(90) // Retention for DocumentView logs
   transmittalTemplate            Json?
   // Feature flags for plan-gated capabilities.
   // Expected shape: { "customRoles": boolean, "advancedWorkflows": boolean, "scim": boolean }
@@ -321,4 +322,33 @@ model Notification {
   @@index([userId, isRead])
   @@index([companyId, createdAt])
   @@index([userId, isRead, createdAt])
+}
+
+// DocumentView — View access logging for ITAR/export-control compliance
+// Records every time a user views, previews, downloads, or QR-scans a document
+// Required for regulated industries (maritime, defense, aerospace)
+model DocumentView {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String?  // Nullable for public QR scans
+  companyId  String   // Denormalized for RLS
+  viewType   ViewType
+  ipAddress  String?  // From x-forwarded-for header
+  userAgent  String?  // From user-agent header
+  viewedAt   DateTime @default(now())
+  sessionId  String?  // For grouping views in one session
+
+  @@index([documentId])
+  @@index([userId])
+  @@index([companyId])
+  @@index([viewedAt])
+  @@index([sessionId])
+  @@index([companyId, documentId, viewedAt]) // Optimized for view history queries
+}
+
+enum ViewType {
+  DETAIL_PAGE // User opened document details page
+  PREVIEW     // User previewed PDF in browser
+  DOWNLOAD    // User downloaded file
+  QR_SCAN     // Public QR code verification scan
 }

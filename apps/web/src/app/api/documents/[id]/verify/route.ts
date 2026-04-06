@@ -4,12 +4,14 @@ import { buildVerificationStatus } from '@docuroute/core/src/qr-verification'
 import { logAuditEvent } from '@docuroute/core/src/audit'
 import { writeVaultEntry } from '@docuroute/core/src/audit-vault'
 import { checkRateLimit } from '@docuroute/core/src/rate-limit'
+import { logDocumentView, extractRequestMetadata } from '@docuroute/core/src/document-view-audit'
 import {
   AuditAction,
   AuditVaultEventType,
   DocumentStatus,
   EngineeringDiscipline,
   IssuePurpose,
+  ViewType,
 } from '@docuroute/types'
 import { notFound } from '@docuroute/core/src/errors'
 
@@ -119,6 +121,18 @@ export async function GET(
       documentFingerprint: document.sha256Hash,
     })
   }
+
+  // Log document view for compliance tracking (fire-and-forget)
+  // Note: userId is null for public QR scans
+  const metadata = extractRequestMetadata(req)
+  logDocumentView({
+    documentId: document.id,
+    userId: null, // Public QR scan - no authenticated user
+    companyId: document.companyId,
+    viewType: ViewType.QR_SCAN,
+    ipAddress: metadata.ipAddress,
+    userAgent: metadata.userAgent,
+  })
 
   return NextResponse.json(status)
 }

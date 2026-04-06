@@ -295,6 +295,14 @@ export enum NotificationType {
   TRANSMITTAL_RETURNED = 'TRANSMITTAL_RETURNED', API_KEY_EXPIRING = 'API_KEY_EXPIRING',
 }
 
+// Document view auditing for ITAR/export-control compliance
+export enum ViewType {
+  DETAIL_PAGE = 'DETAIL_PAGE', // User opened document details page
+  PREVIEW     = 'PREVIEW',     // User previewed PDF in browser
+  DOWNLOAD    = 'DOWNLOAD',    // User downloaded file
+  QR_SCAN     = 'QR_SCAN',     // Public QR code verification scan
+}
+
 export type WorkflowStage = {
   stageNumber: number
   name: string
